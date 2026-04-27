@@ -1,0 +1,738 @@
+import { TaxRules } from "./tax-rules.js";
+
+const defaults = {
+  caseName: "",
+  meetingDate: new Date().toISOString().slice(0, 10),
+  staffName: "",
+  mainPurpose: "overall",
+  meetingMemo: "",
+  hasSpouse: "yes",
+  spouseAge: "",
+  spouseOwnAssets: 0,
+  childrenCount: 2,
+  adoptedCount: 0,
+  parentsCount: 0,
+  siblingsCount: 0,
+  coResident: "unknown",
+  homePlanChild: "unknown",
+  cash: 30000000,
+  securities: 10000000,
+  homeProperty: 40000000,
+  rentalProperty: 0,
+  businessAssets: 0,
+  otherAssets: 0,
+  debts: 0,
+  funeralCosts: 2000000,
+  cashReserveTarget: 0,
+  lifeInsurance: 0,
+  lifeInsuranceHeirs: 0,
+  priorGiftsAddBack: 0,
+  annualGiftPerPerson: 1100000,
+  annualGiftRecipients: 2,
+  annualGiftYears: 5,
+  giftRateType: "special",
+  settlementGift: 0,
+  settlementDeductionUsed: 0,
+  housingGift: 0,
+  housingType: "unknown",
+  spouseHomeGift: "unknown",
+  nextTasks: "",
+  actionAnnualGiftEnabled: false,
+  actionAnnualGiftPerPerson: 1100000,
+  actionAnnualGiftRecipients: 2,
+  actionAnnualGiftYears: 5,
+  actionHousingGiftEnabled: false,
+  actionHousingGiftAmount: 10000000,
+  actionLifeInsuranceEnabled: false,
+  actionLifeInsuranceAmount: 10000000,
+  actionSpouseHomeGiftEnabled: false,
+  actionSpouseHomeGiftAmount: 20000000,
+  actionSettlementEnabled: false,
+  actionSettlementAmount: 25000000,
+  actionCustomReductionEnabled: false,
+  actionCustomReductionAmount: 0
+};
+
+const moneyFields = new Set([
+  "spouseOwnAssets", "cash", "securities", "homeProperty", "rentalProperty", "businessAssets", "otherAssets",
+  "debts", "funeralCosts", "cashReserveTarget", "lifeInsurance", "lifeInsuranceHeirs", "priorGiftsAddBack",
+  "annualGiftPerPerson", "settlementGift", "settlementDeductionUsed", "housingGift",
+  "actionAnnualGiftPerPerson", "actionHousingGiftAmount", "actionLifeInsuranceAmount", "actionSpouseHomeGiftAmount",
+  "actionSettlementAmount", "actionCustomReductionAmount"
+]);
+
+let state = normalizeState({ ...defaults });
+
+function normalizeState(input) {
+  const out = { ...defaults, ...input };
+  for (const field of moneyFields) out[field] = toNumber(out[field]);
+  ["childrenCount", "adoptedCount", "parentsCount", "siblingsCount", "annualGiftRecipients", "annualGiftYears", "actionAnnualGiftRecipients", "actionAnnualGiftYears"].forEach((field) => {
+    out[field] = Math.max(0, Math.floor(toNumber(out[field])));
+  });
+  ["actionAnnualGiftEnabled", "actionHousingGiftEnabled", "actionLifeInsuranceEnabled", "actionSpouseHomeGiftEnabled", "actionSettlementEnabled", "actionCustomReductionEnabled"].forEach((field) => {
+    out[field] = Boolean(out[field]);
+  });
+  return out;
+}
+
+function toNumber(v) {
+  if (typeof v === "number") return Number.isFinite(v) ? v : 0;
+  if (typeof v === "boolean") return v ? 1 : 0;
+  const s = String(v ?? "").replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)).replace(/[^0-9.-]/g, "");
+  const n = Number(s);
+  return Number.isFinite(n) ? n : 0;
+}
+
+const num = (v) => toNumber(v);
+const yen = (v) => num(v).toLocaleString("ja-JP", { style: "currency", currency: "JPY", maximumFractionDigits: 0 });
+const comma = (v) => {
+  const n = num(v);
+  if (!n) return "";
+  return n.toLocaleString("ja-JP");
+};
+const pct = (v) => `${Math.round(v * 100)}%`;
+
+function applyRate(amount, rates) {
+  const taxable = Math.max(0, Math.floor(amount));
+  const row = rates.find((r) => taxable <= r.max);
+  return Math.max(0, Math.floor(taxable * row.rate - row.deduction));
+}
+
+function getHeirInfo(input = state) {
+  const spouse = input.hasSpouse === "yes" ? 1 : 0;
+  const naturalChildren = Math.max(0, Math.floor(num(input.childrenCount)));
+  const adopted = Math.max(0, Math.floor(num(input.adoptedCount)));
+  const adoptedForTax = adopted ? Math.min(adopted, naturalChildren > 0 ? 1 : 2) : 0;
+  const childHeirsForTax = naturalChildren + adoptedForTax;
+  const parents = Math.max(0, Math.floor(num(input.parentsCount)));
+  const siblings = Math.max(0, Math.floor(num(input.siblingsCount)));
+
+  let rank = "";
+  let heirsForTax = spouse;
+  const shares = [];
+
+  if (childHeirsForTax > 0) {
+    rank = "子";
+    heirsForTax += childHeirsForTax;
+    if (spouse) {
+      shares.push({ label: "配偶者", share: 1 / 2 });
+      shares.push({ label: `子等 ${childHeirsForTax}人合計`, share: 1 / 2 });
+    } else {
+      shares.push({ label: `子等 ${childHeirsForTax}人合計`, share: 1 });
+    }
+  } else if (parents > 0) {
+    rank = "直系尊属";
+    heirsForTax += parents;
+    if (spouse) {
+      shares.push({ label: "配偶者", share: 2 / 3 });
+      shares.push({ label: `直系尊属 ${parents}人合計`, share: 1 / 3 });
+    } else {
+      shares.push({ label: `直系尊属 ${parents}人合計`, share: 1 });
+    }
+  } else if (siblings > 0) {
+    rank = "兄弟姉妹";
+    heirsForTax += siblings;
+    if (spouse) {
+      shares.push({ label: "配偶者", share: 3 / 4 });
+      shares.push({ label: `兄弟姉妹等 ${siblings}人合計`, share: 1 / 4 });
+    } else {
+      shares.push({ label: `兄弟姉妹等 ${siblings}人合計`, share: 1 });
+    }
+  } else {
+    rank = spouse ? "配偶者のみ" : "要確認";
+    shares.push({ label: spouse ? "配偶者" : "法定相続人未入力", share: spouse ? 1 : 0 });
+  }
+
+  return {
+    spouse,
+    naturalChildren,
+    adopted,
+    adoptedForTax,
+    childHeirsForTax,
+    parents,
+    siblings,
+    rank,
+    heirsForTax,
+    basicDeduction: 30000000 + 6000000 * heirsForTax,
+    shares
+  };
+}
+
+function calcEstate(input = state) {
+  const heirs = getHeirInfo(input);
+  const insuranceExemption = Math.min(num(input.lifeInsuranceHeirs), 5000000 * heirs.heirsForTax);
+  const taxableInsurance = Math.max(0, num(input.lifeInsurance) - insuranceExemption);
+  const grossAssets =
+    num(input.cash) + num(input.securities) + num(input.homeProperty) +
+    num(input.rentalProperty) + num(input.businessAssets) + num(input.otherAssets) +
+    taxableInsurance + num(input.priorGiftsAddBack);
+  const deductions = num(input.debts) + num(input.funeralCosts);
+  const netEstate = Math.max(0, grossAssets - deductions);
+  const taxableEstate = Math.max(0, netEstate - heirs.basicDeduction);
+  const inheritanceTaxTotal = calcInheritanceTaxTotal(taxableEstate, heirs);
+  const illiquid = num(input.homeProperty) + num(input.rentalProperty) + num(input.businessAssets);
+  const illiquidRatio = grossAssets ? illiquid / grossAssets : 0;
+  return { heirs, insuranceExemption, taxableInsurance, grossAssets, deductions, netEstate, taxableEstate, inheritanceTaxTotal, illiquid, illiquidRatio };
+}
+
+function calcInheritanceTaxTotal(taxableEstate, heirs) {
+  if (!taxableEstate || heirs.heirsForTax <= 0) return 0;
+  let total = 0;
+  for (const s of heirs.shares) {
+    if (s.share <= 0) continue;
+    if (s.label.includes("子等")) {
+      const count = Math.max(1, heirs.childHeirsForTax);
+      const each = taxableEstate * s.share / count;
+      total += applyRate(each, TaxRules.inheritanceTaxRates) * count;
+    } else if (s.label.includes("直系尊属")) {
+      const count = Math.max(1, heirs.parents);
+      const each = taxableEstate * s.share / count;
+      total += applyRate(each, TaxRules.inheritanceTaxRates) * count;
+    } else if (s.label.includes("兄弟姉妹")) {
+      const count = Math.max(1, heirs.siblings);
+      const each = taxableEstate * s.share / count;
+      total += applyRate(each, TaxRules.inheritanceTaxRates) * count;
+    } else {
+      total += applyRate(taxableEstate * s.share, TaxRules.inheritanceTaxRates);
+    }
+  }
+  return Math.floor(total);
+}
+
+function calcSpouseScenario(spouseShare) {
+  const e = calcEstate(state);
+  if (!e.heirs.spouse) return null;
+  const totalTaxBeforeCredit = e.inheritanceTaxTotal;
+  const spouseTaxBefore = totalTaxBeforeCredit * spouseShare;
+  const spouseStatutoryShare = e.heirs.shares.find((s) => s.label === "配偶者")?.share || 0;
+  const spouseReliefLimit = Math.max(160000000, e.netEstate * spouseStatutoryShare);
+  const spouseAcquisition = e.netEstate * spouseShare;
+  const spouseRelief = spouseAcquisition <= spouseReliefLimit ? spouseTaxBefore : spouseTaxBefore * (spouseReliefLimit / Math.max(spouseAcquisition, 1));
+  const firstTax = Math.max(0, totalTaxBeforeCredit - spouseRelief);
+
+  const secondEstate = num(state.spouseOwnAssets) + spouseAcquisition;
+  const secondHeirsInput = {
+    ...state,
+    hasSpouse: "no",
+    childrenCount: state.childrenCount,
+    adoptedCount: state.adoptedCount,
+    parentsCount: 0,
+    siblingsCount: 0,
+    lifeInsurance: 0,
+    lifeInsuranceHeirs: 0,
+    cash: secondEstate,
+    securities: 0,
+    homeProperty: 0,
+    rentalProperty: 0,
+    businessAssets: 0,
+    otherAssets: 0,
+    priorGiftsAddBack: 0,
+    debts: 0,
+    funeralCosts: 0
+  };
+  const second = calcEstate(secondHeirsInput);
+  return {
+    spouseShare,
+    firstTax: Math.floor(firstTax),
+    spouseAcquisition: Math.floor(spouseAcquisition),
+    secondTax: Math.floor(second.inheritanceTaxTotal),
+    totalTax: Math.floor(firstTax + second.inheritanceTaxTotal),
+    comment: spouseShare === 1 ? "一次は軽く見えやすいが二次相続が重くなりやすい" :
+      spouseShare === 0 ? "一次で子へ寄せる案。配偶者生活資金に注意" :
+      "一次・二次のバランス確認"
+  };
+}
+
+function calcGift(input = state) {
+  const annualTaxable = Math.max(0, num(input.annualGiftPerPerson) - 1100000);
+  const annualGiftTaxPerPerson = applyRate(annualTaxable, TaxRules.giftTaxRates[input.giftRateType] || TaxRules.giftTaxRates.special);
+  const totalAnnualGift = num(input.annualGiftPerPerson) * num(input.annualGiftRecipients) * num(input.annualGiftYears);
+  const totalAnnualGiftTax = annualGiftTaxPerPerson * num(input.annualGiftRecipients) * num(input.annualGiftYears);
+
+  const settlementBase = Math.max(0, num(input.settlementGift) - 1100000);
+  const remainingSpecial = Math.max(0, 25000000 - num(input.settlementDeductionUsed));
+  const settlementTaxable = Math.max(0, settlementBase - remainingSpecial);
+  const settlementTax = Math.floor(settlementTaxable * 0.2);
+
+  const housingLimit = input.housingType === "eco" ? 10000000 : input.housingType === "other" ? 5000000 : 0;
+  const housingTaxable = Math.max(0, num(input.housingGift) - housingLimit);
+  const housingGiftTax = applyRate(housingTaxable, TaxRules.giftTaxRates[input.giftRateType] || TaxRules.giftTaxRates.special);
+
+  return { annualTaxable, annualGiftTaxPerPerson, totalAnnualGift, totalAnnualGiftTax, settlementBase, remainingSpecial, settlementTaxable, settlementTax, housingLimit, housingTaxable, housingGiftTax };
+}
+
+function calcActionEffect() {
+  const beforeInput = normalizeState({ ...state });
+  const before = calcEstate(beforeInput);
+  const afterInput = normalizeState({ ...state });
+  const notes = [];
+  let giftTaxCost = 0;
+  let transferAmount = 0;
+
+  if (state.actionAnnualGiftEnabled) {
+    const annualInput = {
+      ...afterInput,
+      annualGiftPerPerson: state.actionAnnualGiftPerPerson,
+      annualGiftRecipients: state.actionAnnualGiftRecipients,
+      annualGiftYears: state.actionAnnualGiftYears
+    };
+    const perYearTaxable = Math.max(0, num(state.actionAnnualGiftPerPerson) - 1100000);
+    const taxPerPerson = applyRate(perYearTaxable, TaxRules.giftTaxRates[state.giftRateType] || TaxRules.giftTaxRates.special);
+    const amount = num(state.actionAnnualGiftPerPerson) * num(state.actionAnnualGiftRecipients) * num(state.actionAnnualGiftYears);
+    const tax = taxPerPerson * num(state.actionAnnualGiftRecipients) * num(state.actionAnnualGiftYears);
+    afterInput.cash = Math.max(0, num(afterInput.cash) - amount);
+    transferAmount += amount;
+    giftTaxCost += tax;
+    notes.push(`暦年贈与：${yen(amount)}を財産から控除。相続開始時期により生前贈与加算の対象となる可能性があります。`);
+  }
+
+  if (state.actionHousingGiftEnabled) {
+    const limit = state.housingType === "eco" ? 10000000 : state.housingType === "other" ? 5000000 : 0;
+    const applied = Math.min(num(state.actionHousingGiftAmount), limit || num(state.actionHousingGiftAmount));
+    const taxable = Math.max(0, num(state.actionHousingGiftAmount) - limit);
+    const tax = limit ? applyRate(taxable, TaxRules.giftTaxRates[state.giftRateType] || TaxRules.giftTaxRates.special) : 0;
+    afterInput.cash = Math.max(0, num(afterInput.cash) - applied);
+    transferAmount += applied;
+    giftTaxCost += tax;
+    notes.push(`住宅取得等資金贈与：非課税枠を前提に${yen(applied)}を財産から控除。住宅要件・期限・所得要件は要確認です。`);
+  }
+
+  if (state.actionLifeInsuranceEnabled) {
+    const amount = num(state.actionLifeInsuranceAmount);
+    afterInput.cash = Math.max(0, num(afterInput.cash) - amount);
+    afterInput.lifeInsurance = num(afterInput.lifeInsurance) + amount;
+    afterInput.lifeInsuranceHeirs = num(afterInput.lifeInsuranceHeirs) + amount;
+    notes.push(`生命保険活用：現預金${yen(amount)}を保険に振替。相続人受取分の非課税枠内で相続税課税価格を圧縮します。`);
+  }
+
+  if (state.actionSpouseHomeGiftEnabled) {
+    const max = 21100000;
+    const amount = Math.min(num(state.actionSpouseHomeGiftAmount), max);
+    const fromHome = Math.min(num(afterInput.homeProperty), amount);
+    afterInput.homeProperty = Math.max(0, num(afterInput.homeProperty) - fromHome);
+    afterInput.cash = Math.max(0, num(afterInput.cash) - Math.max(0, amount - fromHome));
+    afterInput.spouseOwnAssets = num(afterInput.spouseOwnAssets) + amount;
+    transferAmount += amount;
+    notes.push(`夫婦間居住用不動産贈与：${yen(amount)}を一次相続財産から控除し、配偶者固有財産へ移動。二次相続リスクも同時確認が必要です。`);
+  }
+
+  if (state.actionSettlementEnabled) {
+    const amount = num(state.actionSettlementAmount);
+    const base = Math.max(0, amount - 1100000);
+    const remaining = Math.max(0, 25000000 - num(state.settlementDeductionUsed));
+    const taxable = Math.max(0, base - remaining);
+    const tax = taxable * 0.2;
+    giftTaxCost += tax;
+    notes.push(`相続時精算課税：移転額${yen(amount)}。相続税上は原則として相続財産に足し戻すため、ここでは相続税圧縮効果には入れず、将来値上がり分の固定化論点として表示します。`);
+  }
+
+  if (state.actionCustomReductionEnabled) {
+    const amount = num(state.actionCustomReductionAmount);
+    const fields = ["otherAssets", "securities", "rentalProperty", "businessAssets", "homeProperty", "cash"];
+    let remaining = amount;
+    for (const field of fields) {
+      const used = Math.min(num(afterInput[field]), remaining);
+      afterInput[field] = Math.max(0, num(afterInput[field]) - used);
+      remaining -= used;
+      if (remaining <= 0) break;
+    }
+    transferAmount += amount - Math.max(0, remaining);
+    notes.push(`その他の評価圧縮・資産移転：${yen(amount - Math.max(0, remaining))}を概算控除。具体策の根拠・評価方法は必ず個別確認してください。`);
+  }
+
+  const after = calcEstate(afterInput);
+  return {
+    before,
+    after,
+    afterInput,
+    giftTaxCost: Math.floor(giftTaxCost),
+    transferAmount: Math.floor(transferAmount),
+    taxReduction: Math.floor(before.inheritanceTaxTotal - after.inheritanceTaxTotal),
+    taxableEstateReduction: Math.floor(before.taxableEstate - after.taxableEstate),
+    netEstateReduction: Math.floor(before.netEstate - after.netEstate),
+    notes
+  };
+}
+
+function riskClass(level) {
+  return level === "高" ? "high" : level === "中" ? "mid" : "low";
+}
+
+function diagnoseRisks(input = state) {
+  const e = calcEstate(input);
+  const cashAfterReserve = num(input.cash) - num(input.cashReserveTarget);
+  const taxRisk = e.taxableEstate > 0 ? (e.inheritanceTaxTotal > 10000000 ? "高" : "中") : "低";
+  const cashRisk = e.inheritanceTaxTotal > cashAfterReserve ? "高" : e.inheritanceTaxTotal > cashAfterReserve * 0.5 ? "中" : "低";
+  const splitRisk = e.illiquidRatio >= 0.7 ? "高" : e.illiquidRatio >= 0.45 ? "中" : "低";
+  const secondRisk = input.hasSpouse === "yes" && num(input.spouseOwnAssets) + e.netEstate * 0.5 > e.heirs.basicDeduction ? "中" : "低";
+  return { taxRisk, cashRisk, splitRisk, secondRisk };
+}
+
+function makeCard(label, value, note = "") {
+  const tpl = document.getElementById("cardTemplate");
+  const node = tpl.content.firstElementChild.cloneNode(true);
+  node.querySelector(".label").textContent = label;
+  node.querySelector(".value").textContent = value;
+  node.querySelector(".note").textContent = note;
+  return node;
+}
+
+function renderCards(id, cards) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.innerHTML = "";
+  cards.forEach((c) => el.appendChild(makeCard(c[0], c[1], c[2])));
+}
+
+function renderInputValues() {
+  document.querySelectorAll("[data-field]").forEach((el) => {
+    if (document.activeElement === el) return;
+    const key = el.dataset.field;
+    if (el.type === "checkbox") el.checked = Boolean(state[key]);
+    else el.value = el.hasAttribute("data-money") ? comma(state[key]) : (state[key] ?? "");
+  });
+  document.querySelectorAll("[data-action-field]").forEach((el) => {
+    if (document.activeElement === el) return;
+    const key = el.dataset.actionField;
+    if (el.type === "checkbox") el.checked = Boolean(state[key]);
+    else el.value = el.hasAttribute("data-money") ? comma(state[key]) : (state[key] ?? "");
+  });
+}
+
+function render() {
+  renderInputValues();
+  const e = calcEstate(state);
+  const g = calcGift(state);
+  const risks = diagnoseRisks(state);
+
+  renderCards("familyResults", [
+    ["法定相続人の数（税額計算用）", `${e.heirs.heirsForTax}人`, `養子算入：${e.heirs.adoptedForTax}人 / 相続順位：${e.heirs.rank}`],
+    ["基礎控除額", yen(e.heirs.basicDeduction), "3,000万円 + 600万円 × 法定相続人"],
+    ["法定相続分の概略", e.heirs.shares.map((s) => `${s.label} ${pct(s.share)}`).join(" / "), "詳細な相続関係は別途確認"]
+  ]);
+
+  renderCards("assetResults", [
+    ["課税対象財産 概算", yen(e.grossAssets), "死亡保険金の非課税控除後・過去贈与加算含む"],
+    ["債務・葬式費用", yen(e.deductions), "第1版では単純控除"],
+    ["正味財産 概算", yen(e.netEstate), "小規模宅地等の特例は未反映"],
+    ["不動産・事業資産比率", pct(e.illiquidRatio), "分割困難・納税資金リスクの目安"],
+    ["死亡保険金非課税枠", yen(e.insuranceExemption), "500万円 × 法定相続人の数"],
+    ["課税対象保険金", yen(e.taxableInsurance), "受取人・契約者・被保険者の確認が必要"]
+  ]);
+
+  renderCards("giftResults", [
+    ["暦年贈与税 / 人・年", yen(g.annualGiftTaxPerPerson), `課税価格 ${yen(g.annualTaxable)}`],
+    ["暦年贈与 移転総額", yen(g.totalAnnualGift), `${state.annualGiftRecipients || 0}人 × ${state.annualGiftYears || 0}年`],
+    ["暦年贈与税 合計概算", yen(g.totalAnnualGiftTax), "生前贈与加算対象期間に注意"],
+    ["相続時精算課税 贈与税概算", yen(g.settlementTax), `残特別控除 ${yen(g.remainingSpecial)}`],
+    ["住宅資金贈与 非課税枠", yen(g.housingLimit), "要件・期限・証明書類の確認が必要"],
+    ["住宅資金贈与 課税候補", yen(g.housingTaxable), "暦年または精算課税との関係を確認"]
+  ]);
+
+  renderCards("diagnosisResults", [
+    ["正味財産", yen(e.netEstate), "概算"],
+    ["課税遺産総額", yen(e.taxableEstate), "正味財産 − 基礎控除"],
+    ["相続税総額 概算", yen(e.inheritanceTaxTotal), "税額控除前の概算"],
+    ["現預金", yen(num(state.cash)), "納税資金候補"],
+    ["納税資金不足目安", yen(Math.max(0, e.inheritanceTaxTotal - (num(state.cash) - num(state.cashReserveTarget)))), "現預金から留保目標を控除"],
+    ["過去贈与加算入力額", yen(num(state.priorGiftsAddBack)), "加算対象期間・相手方を確認"]
+  ]);
+
+  renderRiskBand(risks);
+  renderSpouseScenarios();
+  renderActionComparison();
+  if (!document.activeElement || !document.activeElement.closest("#actionList") || document.activeElement.type === "checkbox") renderActionCards();
+  renderSources();
+  renderSummary();
+}
+
+function renderRiskBand(risks) {
+  const riskBand = document.getElementById("riskBand");
+  if (!riskBand) return;
+  riskBand.innerHTML = "";
+  [["相続税リスク", risks.taxRisk], ["納税資金リスク", risks.cashRisk], ["分割困難リスク", risks.splitRisk], ["二次相続リスク", risks.secondRisk]].forEach(([label, level]) => {
+    const div = document.createElement("div");
+    div.className = `risk ${riskClass(level)}`;
+    div.innerHTML = `<span>${label}</span><b>${level}</b>`;
+    riskBand.appendChild(div);
+  });
+}
+
+function renderSpouseScenarios() {
+  const tbody = document.querySelector("#spouseScenarioTable tbody");
+  if (!tbody) return;
+  tbody.innerHTML = "";
+  if (state.hasSpouse !== "yes") {
+    tbody.innerHTML = `<tr><td colspan="6">配偶者なしのため、配偶者取得割合比較は対象外です。</td></tr>`;
+    return;
+  }
+  [0, 0.25, 0.5, 0.75, 1].forEach((r) => {
+    const s = calcSpouseScenario(r);
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${pct(r)}</td>
+      <td>${yen(s.firstTax)}</td>
+      <td>${yen(s.spouseAcquisition)}</td>
+      <td>${yen(s.secondTax)}</td>
+      <td><strong>${yen(s.totalTax)}</strong></td>
+      <td>${s.comment}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function diffText(diff) {
+  if (diff > 0) return `▲ ${yen(diff)}`;
+  if (diff < 0) return `▼ ${yen(Math.abs(diff))}`;
+  return "変化なし";
+}
+
+function renderActionComparison() {
+  const effect = calcActionEffect();
+  const beforeCashShortage = Math.max(0, effect.before.inheritanceTaxTotal - (num(state.cash) - num(state.cashReserveTarget)));
+  const afterCashShortage = Math.max(0, effect.after.inheritanceTaxTotal - (num(effect.afterInput.cash) - num(effect.afterInput.cashReserveTarget)));
+  const beforeAfter = document.getElementById("beforeAfter");
+  if (beforeAfter) {
+    beforeAfter.innerHTML = `
+      <article class="ba-card before"><span>現状の相続税概算</span><strong>${yen(effect.before.inheritanceTaxTotal)}</strong><small>課税遺産総額 ${yen(effect.before.taxableEstate)}</small></article>
+      <article class="ba-card after"><span>対策後の相続税概算</span><strong>${yen(effect.after.inheritanceTaxTotal)}</strong><small>課税遺産総額 ${yen(effect.after.taxableEstate)}</small></article>
+      <article class="ba-card impact"><span>相続税の概算効果</span><strong>${diffText(effect.taxReduction)}</strong><small>贈与税等概算コスト ${yen(effect.giftTaxCost)}</small></article>
+    `;
+  }
+
+  const tbody = document.querySelector("#effectTable tbody");
+  if (!tbody) return;
+  const rows = [
+    ["正味財産", effect.before.netEstate, effect.after.netEstate, effect.before.netEstate - effect.after.netEstate],
+    ["課税遺産総額", effect.before.taxableEstate, effect.after.taxableEstate, effect.taxableEstateReduction],
+    ["相続税総額概算", effect.before.inheritanceTaxTotal, effect.after.inheritanceTaxTotal, effect.taxReduction],
+    ["納税資金不足目安", beforeCashShortage, afterCashShortage, beforeCashShortage - afterCashShortage],
+    ["死亡保険金非課税利用額", effect.before.insuranceExemption, effect.after.insuranceExemption, effect.after.insuranceExemption - effect.before.insuranceExemption],
+    ["贈与税等概算コスト", 0, effect.giftTaxCost, -effect.giftTaxCost]
+  ];
+  tbody.innerHTML = rows.map(([label, before, after, diff]) => `
+    <tr>
+      <td>${label}</td>
+      <td>${yen(before)}</td>
+      <td>${yen(after)}</td>
+      <td class="${diff > 0 ? "positive" : diff < 0 ? "negative" : ""}">${diffText(diff)}</td>
+    </tr>
+  `).join("") + `
+    <tr><td colspan="4"><strong>メモ：</strong>${effect.notes.length ? effect.notes.join(" ") : "打ち手が未選択です。候補にチェックを入れると概算効果が表示されます。"}</td></tr>
+  `;
+}
+
+function actionDefinitions() {
+  const e = calcEstate(state);
+  const remainingInsuranceRoom = Math.max(0, 5000000 * e.heirs.heirsForTax - num(state.lifeInsuranceHeirs));
+  return [
+    {
+      enabled: "actionAnnualGiftEnabled",
+      title: "暦年贈与で少しずつ移す",
+      source: "annual_gift",
+      level: "中",
+      body: "加算対象期間に注意しつつ、現預金などを子・孫へ段階的に移す案です。",
+      fields: [
+        ["actionAnnualGiftPerPerson", "年間贈与額 / 人", "例：1,100,000"],
+        ["actionAnnualGiftRecipients", "贈与対象人数", "例：2", "number"],
+        ["actionAnnualGiftYears", "年数", "例：5", "number"]
+      ]
+    },
+    {
+      enabled: "actionHousingGiftEnabled",
+      title: "住宅取得等資金贈与を使う",
+      source: "housing_gift",
+      level: state.homePlanChild === "yes" ? "中" : "低",
+      body: "住宅取得予定の子・孫がいる場合に検討します。住宅区分・期限・所得要件は必ず確認します。",
+      fields: [["actionHousingGiftAmount", "贈与予定額", "例：10,000,000"]]
+    },
+    {
+      enabled: "actionLifeInsuranceEnabled",
+      title: "生命保険で納税資金を確保する",
+      source: "life_insurance",
+      level: remainingInsuranceRoom > 0 ? "中" : "低",
+      body: `相続人受取の死亡保険金非課税枠の残り目安は ${yen(remainingInsuranceRoom)} です。納税資金確保にも使います。`,
+      fields: [["actionLifeInsuranceAmount", "保険への振替額", "例：10,000,000"]]
+    },
+    {
+      enabled: "actionSpouseHomeGiftEnabled",
+      title: "夫婦間居住用不動産贈与を検討する",
+      source: "spouse_home_gift",
+      level: state.hasSpouse === "yes" ? "中" : "低",
+      body: "配偶者の生活基盤を守る案です。ただし、配偶者固有財産が増えるため二次相続も同時に見ます。",
+      fields: [["actionSpouseHomeGiftAmount", "移転額", "例：20,000,000"]]
+    },
+    {
+      enabled: "actionSettlementEnabled",
+      title: "相続時精算課税で将来値上がり分を固定する",
+      source: "settlement_tax",
+      level: "中",
+      body: "相続税を直接減らすというより、値上がり資産・収益資産の将来増加分を固定化する発想です。",
+      fields: [["actionSettlementAmount", "移転予定額", "例：25,000,000"]]
+    },
+    {
+      enabled: "actionCustomReductionEnabled",
+      title: "その他の評価圧縮・資産移転効果を仮置きする",
+      source: "tool_disclaimer",
+      level: e.illiquidRatio >= 0.45 ? "高" : "低",
+      body: "不動産評価、事業承継、資産組替えなどの個別検討効果を仮置きする欄です。根拠確認なしで提案確定しないでください。",
+      fields: [["actionCustomReductionAmount", "概算効果額", "例：10,000,000"]]
+    }
+  ];
+}
+
+function renderActionCards() {
+  const wrap = document.getElementById("actionList");
+  if (!wrap) return;
+  wrap.innerHTML = "";
+  actionDefinitions().forEach((def) => {
+    const div = document.createElement("article");
+    div.className = `action ${state[def.enabled] ? "selected" : ""}`;
+    div.innerHTML = `
+      <div class="action-head">
+        <label class="check-label"><input type="checkbox" data-action-field="${def.enabled}" ${state[def.enabled] ? "checked" : ""}> <span>${def.title}</span></label>
+        <span class="tag ${riskClass(def.level)}">${def.level}</span>
+      </div>
+      <p>${def.body}</p>
+      <div class="action-fields">
+        ${def.fields.map(([key, label, ph, type]) => `
+          <label>${label}
+            <input ${type === "number" ? `type="number" min="0" step="1"` : `data-money inputmode="numeric"`} data-action-field="${key}" placeholder="${ph}" value="${type === "number" ? (state[key] ?? "") : comma(state[key])}">
+          </label>`).join("")}
+      </div>
+      <button type="button" class="source-btn" data-source="${def.source}">根拠を見る</button>
+    `;
+    wrap.appendChild(div);
+  });
+}
+
+function renderSources() {
+  const wrap = document.getElementById("sourceList");
+  if (!wrap) return;
+  wrap.innerHTML = "";
+  Object.entries(TaxRules.sources).forEach(([key, s]) => {
+    const div = document.createElement("article");
+    div.className = "source-item";
+    div.innerHTML = `
+      <h3>${s.title}</h3>
+      <p>${s.summary}</p>
+      <p>使用箇所：${(s.usage || []).join("、")}</p>
+      ${s.url ? `<a href="${s.url}" target="_blank" rel="noopener">根拠ページを開く</a>` : `<span>運用上の注意</span>`}
+      <div><button type="button" class="source-btn" data-source="${key}">詳細</button></div>
+    `;
+    wrap.appendChild(div);
+  });
+}
+
+function renderSummary() {
+  const e = calcEstate(state);
+  const r = diagnoseRisks(state);
+  const effect = calcActionEffect();
+  document.getElementById("liveSummary").innerHTML = `
+    <div class="mini"><span>正味財産</span><b>${yen(e.netEstate)}</b></div>
+    <div class="mini"><span>基礎控除</span><b>${yen(e.heirs.basicDeduction)}</b></div>
+    <div class="mini"><span>相続税総額概算</span><b>${yen(e.inheritanceTaxTotal)}</b></div>
+    <div class="mini"><span>打ち手後概算</span><b>${yen(effect.after.inheritanceTaxTotal)}</b></div>
+    <div class="mini"><span>法定相続人</span><b>${e.heirs.heirsForTax}人</b></div>
+    <div class="mini"><span>主なリスク</span><b>税:${r.taxRisk} / 資金:${r.cashRisk} / 分割:${r.splitRisk}</b></div>
+  `;
+}
+
+function openSource(key) {
+  const s = TaxRules.sources[key] || TaxRules.sources.tool_disclaimer;
+  document.getElementById("sourceTitle").textContent = s.title;
+  document.getElementById("sourceBody").innerHTML = `
+    <p>${s.summary}</p>
+    <div class="source-meta">
+      ${s.formula ? `<div><strong>計算式：</strong>${s.formula}</div>` : ""}
+      <div><strong>根拠：</strong>${s.sourceTitle || "運用上の注意"}</div>
+      <div><strong>確認日：</strong>${s.lastChecked}</div>
+      <div><strong>使用箇所：</strong>${(s.usage || []).join("、")}</div>
+    </div>
+    ${s.url ? `<p><a href="${s.url}" target="_blank" rel="noopener">根拠ページを新しいタブで開く</a></p>` : ""}
+    <ul class="checklist">
+      <li>この制度の要件・期限・添付書類を最新情報で確認する。</li>
+      <li>入力値と家族関係に未確認事項があれば、実行判断を保留する。</li>
+      <li>税額だけでなく、納税資金・分割・二次相続・生活資金を同時に見る。</li>
+    </ul>
+  `;
+  document.getElementById("sourceDialog").showModal();
+}
+
+function collectStateFromInputs() {
+  document.querySelectorAll("[data-field]").forEach((el) => {
+    const key = el.dataset.field;
+    if (el.type === "checkbox") state[key] = el.checked;
+    else state[key] = el.hasAttribute("data-money") ? toNumber(el.value) : el.value;
+  });
+  document.querySelectorAll("[data-action-field]").forEach((el) => {
+    const key = el.dataset.actionField;
+    if (el.type === "checkbox") state[key] = el.checked;
+    else state[key] = el.hasAttribute("data-money") ? toNumber(el.value) : el.value;
+  });
+  state = normalizeState(state);
+}
+
+function formatMoneyInput(el) {
+  const raw = el.value;
+  const n = toNumber(raw);
+  el.value = n ? n.toLocaleString("ja-JP") : "";
+}
+
+document.addEventListener("input", (e) => {
+  if (e.target.matches("[data-money]")) formatMoneyInput(e.target);
+  if (e.target.matches("[data-field], [data-action-field]")) {
+    collectStateFromInputs();
+    render();
+  }
+});
+
+document.addEventListener("change", (e) => {
+  if (e.target.matches("[data-field], [data-action-field]")) {
+    collectStateFromInputs();
+    render();
+  }
+});
+
+document.addEventListener("click", (e) => {
+  const tab = e.target.closest(".tab");
+  if (tab) {
+    document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+    document.querySelectorAll(".tab-panel").forEach((p) => p.classList.remove("active"));
+    tab.classList.add("active");
+    document.getElementById(tab.dataset.tab).classList.add("active");
+  }
+  const src = e.target.closest("[data-source]");
+  if (src && !src.classList.contains("tab")) openSource(src.dataset.source);
+});
+
+document.getElementById("closeSource").addEventListener("click", () => document.getElementById("sourceDialog").close());
+document.getElementById("saveBtn").addEventListener("click", () => {
+  collectStateFromInputs();
+  localStorage.setItem("shisan-shokei-navi", JSON.stringify(state));
+  alert("ブラウザに一時保存しました。");
+});
+document.getElementById("loadBtn").addEventListener("click", () => {
+  const saved = localStorage.getItem("shisan-shokei-navi");
+  if (!saved) return alert("保存データがありません。");
+  state = normalizeState(JSON.parse(saved));
+  render();
+});
+document.getElementById("exportBtn").addEventListener("click", () => {
+  collectStateFromInputs();
+  const blob = new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), state }, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `資産承継面談_${state.caseName || "案件"}_${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+document.getElementById("importFile").addEventListener("change", async (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  const text = await file.text();
+  const parsed = JSON.parse(text);
+  state = normalizeState(parsed.state || parsed);
+  render();
+});
+
+render();

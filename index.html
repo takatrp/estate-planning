@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>資産承継 面談ナビゲーター</title>
+  <meta name="description" content="相続・贈与の面談時に、クライアントと同じ画面を見ながら家族構成・資産構成・打ち手・概算効果・根拠リンクを整理するツール。" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div>
+      <p class="eyebrow">面談同席型 / 資産承継支援ツール</p>
+      <h1>資産承継 面談ナビゲーター</h1>
+      <p class="lead">
+        家族構成・資産構成・過去贈与・保険・配偶者取得割合を整理し、クライアントと同じ画面を見ながら打ち手と概算効果を検討します。
+      </p>
+    </div>
+    <div class="header-actions">
+      <button type="button" class="ghost" id="saveBtn">一時保存</button>
+      <button type="button" class="ghost" id="loadBtn">保存読込</button>
+      <button type="button" class="ghost" id="exportBtn">JSON保存</button>
+      <label class="ghost file-label">JSON読込<input type="file" id="importFile" accept="application/json" /></label>
+      <button type="button" class="primary" onclick="window.print()">面談メモ印刷</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <nav class="tabs" aria-label="入力ステップ">
+      <button class="tab active" data-tab="summary">概要</button>
+      <button class="tab" data-tab="family">家族構成</button>
+      <button class="tab" data-tab="assets">資産構成</button>
+      <button class="tab" data-tab="gifts">贈与・保険</button>
+      <button class="tab" data-tab="diagnosis">現状診断</button>
+      <button class="tab" data-tab="actions">打ち手比較</button>
+      <button class="tab" data-tab="sources">根拠一覧</button>
+    </nav>
+
+    <section class="workspace">
+      <section class="panel tab-panel active" id="summary">
+        <div class="section-head">
+          <div>
+            <h2>面談概要</h2>
+            <p>職員が操作し、クライアントと同じ画面を見ながら現状・論点・打ち手を整理する前提です。</p>
+          </div>
+          <button class="source-btn" data-source="tool_disclaimer">根拠・注意</button>
+        </div>
+
+        <div class="grid two">
+          <label>相談者名・案件名
+            <input data-field="caseName" placeholder="例：山田家 相続対策相談" />
+          </label>
+          <label>面談日
+            <input data-field="meetingDate" type="date" />
+          </label>
+          <label>担当者
+            <input data-field="staffName" placeholder="例：松本" />
+          </label>
+          <label>主な相談目的
+            <select data-field="mainPurpose">
+              <option value="overall">全体整理</option>
+              <option value="taxSaving">相続税・贈与税の負担軽減</option>
+              <option value="cash">納税資金確保</option>
+              <option value="spouse">配偶者の生活保障</option>
+              <option value="children">子・孫への移転</option>
+              <option value="business">事業承継</option>
+            </select>
+          </label>
+        </div>
+
+        <label>面談メモ
+          <textarea data-field="meetingMemo" rows="6" placeholder="相談の背景、家族関係の温度感、未確認事項など"></textarea>
+        </label>
+
+        <div class="notice">
+          <strong>このツールの位置づけ</strong>
+          <p>
+            この画面は、結論を一方的に出すためのものではありません。家族構成・資産構成・制度の根拠を同じ画面で確認し、
+            どの打ち手を検討するかを一緒に整理するための面談支援ツールです。実行判断・申告計算では、個別評価と税理士確認を行います。
+          </p>
+        </div>
+      </section>
+
+      <section class="panel tab-panel" id="family">
+        <div class="section-head">
+          <div>
+            <h2>家族構成</h2>
+            <p>法定相続人、基礎控除、法定相続分の前提を整理します。</p>
+          </div>
+          <button class="source-btn" data-source="inheritance_basic">根拠</button>
+        </div>
+
+        <div class="grid three">
+          <label>配偶者
+            <select data-field="hasSpouse">
+              <option value="yes">あり</option>
+              <option value="no">なし</option>
+            </select>
+          </label>
+          <label>配偶者年齢
+            <input data-field="spouseAge" type="number" min="0" step="1" />
+          </label>
+          <label>配偶者固有財産 概算
+            <input data-field="spouseOwnAssets" data-money inputmode="numeric" placeholder="例：20,000,000" />
+          </label>
+          <label>実子・代襲相続人の人数
+            <input data-field="childrenCount" type="number" min="0" step="1" />
+          </label>
+          <label>養子の人数
+            <input data-field="adoptedCount" type="number" min="0" step="1" />
+          </label>
+          <label>父母等の直系尊属人数（子なしの場合）
+            <input data-field="parentsCount" type="number" min="0" step="1" />
+          </label>
+          <label>兄弟姉妹・代襲相続人の人数（子・直系尊属なしの場合）
+            <input data-field="siblingsCount" type="number" min="0" step="1" />
+          </label>
+          <label>同居親族あり
+            <select data-field="coResident">
+              <option value="unknown">未確認</option>
+              <option value="yes">あり</option>
+              <option value="no">なし</option>
+            </select>
+          </label>
+          <label>住宅取得予定の子・孫
+            <select data-field="homePlanChild">
+              <option value="unknown">未確認</option>
+              <option value="yes">あり</option>
+              <option value="no">なし</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="result-cards" id="familyResults"></div>
+
+        <div class="staff-script">
+          <h3>面談時の確認トーク</h3>
+          <p>
+            「まず相続税の概算は、誰が法定相続人になるかで基礎控除が変わります。
+            ただし、法定相続分どおりに分けることが正解とは限りません。納税資金、配偶者の生活資金、二次相続、家族関係を分けて確認します。」
+          </p>
+        </div>
+      </section>
+
+      <section class="panel tab-panel" id="assets">
+        <div class="section-head">
+          <div>
+            <h2>資産構成</h2>
+            <p>財産額だけでなく、納税資金・分割困難性・二次相続への影響を見ます。</p>
+          </div>
+          <button class="source-btn" data-source="inheritance_tax_rate">根拠</button>
+        </div>
+
+        <div class="grid three">
+          <label>現預金
+            <input data-field="cash" data-money inputmode="numeric" placeholder="例：30,000,000" />
+          </label>
+          <label>上場株式・投信等
+            <input data-field="securities" data-money inputmode="numeric" placeholder="例：10,000,000" />
+          </label>
+          <label>自宅土地建物 評価概算
+            <input data-field="homeProperty" data-money inputmode="numeric" placeholder="例：40,000,000" />
+          </label>
+          <label>貸付不動産 評価概算
+            <input data-field="rentalProperty" data-money inputmode="numeric" placeholder="例：20,000,000" />
+          </label>
+          <label>非上場株式・事業用資産
+            <input data-field="businessAssets" data-money inputmode="numeric" placeholder="例：50,000,000" />
+          </label>
+          <label>その他財産
+            <input data-field="otherAssets" data-money inputmode="numeric" placeholder="例：5,000,000" />
+          </label>
+          <label>借入金・債務
+            <input data-field="debts" data-money inputmode="numeric" placeholder="例：10,000,000" />
+          </label>
+          <label>葬式費用見込
+            <input data-field="funeralCosts" data-money inputmode="numeric" placeholder="例：2,000,000" />
+          </label>
+          <label>納税資金として残したい現金
+            <input data-field="cashReserveTarget" data-money inputmode="numeric" placeholder="例：5,000,000" />
+          </label>
+        </div>
+
+        <div class="result-cards" id="assetResults"></div>
+
+        <div class="notice warning">
+          <strong>要個別確認</strong>
+          <p>小規模宅地等の特例、土地評価、非上場株式評価、貸付不動産評価の詳細は第1版では自動判定しません。論点フラグとして表示します。</p>
+        </div>
+      </section>
+
+      <section class="panel tab-panel" id="gifts">
+        <div class="section-head">
+          <div>
+            <h2>贈与・保険</h2>
+            <p>過去贈与、生前贈与加算、相続時精算課税、生命保険非課税枠を確認します。</p>
+          </div>
+          <button class="source-btn" data-source="annual_gift">根拠</button>
+        </div>
+
+        <div class="grid three">
+          <label>死亡保険金総額
+            <input data-field="lifeInsurance" data-money inputmode="numeric" placeholder="例：10,000,000" />
+          </label>
+          <label>受取人が相続人である保険金
+            <input data-field="lifeInsuranceHeirs" data-money inputmode="numeric" placeholder="例：10,000,000" />
+          </label>
+          <label>過去贈与の概算加算額
+            <input data-field="priorGiftsAddBack" data-money inputmode="numeric" placeholder="例：3,000,000" />
+          </label>
+          <label>年間贈与額 / 人
+            <input data-field="annualGiftPerPerson" data-money inputmode="numeric" placeholder="例：1,100,000" />
+          </label>
+          <label>贈与対象人数
+            <input data-field="annualGiftRecipients" type="number" min="0" step="1" />
+          </label>
+          <label>継続年数
+            <input data-field="annualGiftYears" type="number" min="0" step="1" />
+          </label>
+          <label>暦年贈与の税率区分
+            <select data-field="giftRateType">
+              <option value="special">特例税率（直系尊属→18歳以上の子・孫）</option>
+              <option value="general">一般税率</option>
+            </select>
+          </label>
+          <label>相続時精算課税 贈与予定額
+            <input data-field="settlementGift" data-money inputmode="numeric" placeholder="例：25,000,000" />
+          </label>
+          <label>相続時精算課税 既使用特別控除額
+            <input data-field="settlementDeductionUsed" data-money inputmode="numeric" placeholder="例：0" />
+          </label>
+          <label>住宅取得等資金贈与予定額
+            <input data-field="housingGift" data-money inputmode="numeric" placeholder="例：10,000,000" />
+          </label>
+          <label>住宅区分
+            <select data-field="housingType">
+              <option value="eco">省エネ等住宅</option>
+              <option value="other">その他住宅</option>
+              <option value="unknown">未確認</option>
+            </select>
+          </label>
+          <label>夫婦間居住用不動産贈与
+            <select data-field="spouseHomeGift">
+              <option value="unknown">未確認</option>
+              <option value="possible">可能性あり</option>
+              <option value="no">該当なし</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="result-cards" id="giftResults"></div>
+
+        <div class="staff-script">
+          <h3>面談時の確認トーク</h3>
+          <p>
+            「年110万円以内なら常に相続税と無関係、という説明は危険です。
+            相続開始前の加算対象期間内の贈与は、贈与税がかかっていたかどうかに関係なく、相続税の課税価格へ加算される可能性があります。」
+          </p>
+        </div>
+      </section>
+
+      <section class="panel tab-panel" id="diagnosis">
+        <div class="section-head">
+          <div>
+            <h2>現状診断</h2>
+            <p>相続税概算、配偶者取得割合別、二次相続の粗い影響を一覧化します。</p>
+          </div>
+          <button class="source-btn" data-source="spouse_relief">根拠</button>
+        </div>
+
+        <div class="summary-band" id="riskBand"></div>
+        <div class="result-cards" id="diagnosisResults"></div>
+
+        <h3>配偶者取得割合別の概算比較</h3>
+        <div class="table-wrap">
+          <table id="spouseScenarioTable">
+            <thead>
+              <tr>
+                <th>配偶者取得割合</th>
+                <th>一次相続税概算</th>
+                <th>配偶者取得後財産</th>
+                <th>二次相続概算</th>
+                <th>合計概算</th>
+                <th>コメント</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <div class="notice">
+          <strong>重要</strong>
+          <p>一次相続税が少ないことと、家族全体で有利であることは同義ではありません。配偶者固有財産、生活資金、二次相続、分割可能性を必ず別枠で検討してください。</p>
+        </div>
+      </section>
+
+      <section class="panel tab-panel" id="actions">
+        <div class="section-head">
+          <div>
+            <h2>打ち手比較</h2>
+            <p>候補にチェックを入れ、金額を入力すると、現状と対策後の概算差額を表示します。</p>
+          </div>
+          <button class="source-btn" data-source="tool_disclaimer">根拠・注意</button>
+        </div>
+
+        <div class="before-after" id="beforeAfter"></div>
+        <div class="effect-table-wrap table-wrap">
+          <table id="effectTable">
+            <thead>
+              <tr>
+                <th>項目</th>
+                <th>現状</th>
+                <th>対策後</th>
+                <th>差額・効果</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <h3>打ち手候補</h3>
+        <p class="muted-text">ここでの効果は概算です。特に生前贈与加算、小規模宅地等の特例、財産評価、相続時精算課税は、実行前に個別確認してください。</p>
+        <div id="actionList" class="action-list"></div>
+
+        <label>次回までの確認資料・宿題
+          <textarea data-field="nextTasks" rows="6" placeholder="固定資産税課税明細、保険証券、過去贈与一覧、家族の意向確認など"></textarea>
+        </label>
+      </section>
+
+      <section class="panel tab-panel" id="sources">
+        <div class="section-head">
+          <div>
+            <h2>根拠一覧</h2>
+            <p>各画面・各要素に紐づく根拠ページです。税制改正時はこのマスタを優先的に更新します。</p>
+          </div>
+        </div>
+        <div id="sourceList" class="source-list"></div>
+      </section>
+    </section>
+
+    <aside class="side-panel print-hide">
+      <h2>現在の要約</h2>
+      <div id="liveSummary"></div>
+      <hr />
+      <h3>面談上の注意</h3>
+      <ul class="compact">
+        <li>概算・論点整理用です。</li>
+        <li>実行前に税理士確認を前提とします。</li>
+        <li>土地評価・小規模宅地・株価評価は個別確認です。</li>
+      </ul>
+    </aside>
+  </main>
+
+  <dialog id="sourceDialog" class="source-dialog">
+    <div class="dialog-head">
+      <h2 id="sourceTitle">根拠</h2>
+      <button type="button" class="icon-btn" id="closeSource">×</button>
+    </div>
+    <div id="sourceBody"></div>
+  </dialog>
+
+  <template id="cardTemplate">
+    <article class="metric-card">
+      <p class="label"></p>
+      <p class="value"></p>
+      <p class="note"></p>
+    </article>
+  </template>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
