@@ -48,31 +48,37 @@
           <button class="source-btn" data-source="tool_disclaimer">根拠・注意</button>
         </div>
 
-        <div class="grid two">
-          <label>相談者名・案件名
-            <input data-field="caseName" placeholder="例：山田家 相続対策相談" />
-          </label>
-          <label>面談日
-            <input data-field="meetingDate" type="date" />
-          </label>
-          <label>担当者
-            <input data-field="staffName" placeholder="例：松本" />
-          </label>
-          <label>主な相談目的
-            <select data-field="mainPurpose">
-              <option value="overall">全体整理</option>
-              <option value="taxSaving">相続税・贈与税の負担軽減</option>
-              <option value="cash">納税資金確保</option>
-              <option value="spouse">配偶者の生活保障</option>
-              <option value="children">子・孫への移転</option>
-              <option value="business">事業承継</option>
-            </select>
-          </label>
+        <div class="input-group">
+          <h3>案件情報</h3>
+          <div class="grid two">
+            <label>相談者名・案件名
+              <input data-field="caseName" placeholder="例：山田家 相続対策相談" />
+            </label>
+            <label>面談日
+              <input data-field="meetingDate" type="date" />
+            </label>
+            <label>担当者
+              <input data-field="staffName" placeholder="例：松本" />
+            </label>
+            <label>主な相談目的
+              <select data-field="mainPurpose">
+                <option value="overall">全体整理</option>
+                <option value="taxSaving">相続税・贈与税の負担軽減</option>
+                <option value="cash">納税資金確保</option>
+                <option value="spouse">配偶者の生活保障</option>
+                <option value="children">子・孫への移転</option>
+                <option value="business">事業承継</option>
+              </select>
+            </label>
+          </div>
         </div>
 
-        <label>面談メモ
-          <textarea data-field="meetingMemo" rows="6" placeholder="相談の背景、家族関係の温度感、未確認事項など"></textarea>
-        </label>
+        <div class="input-group">
+          <h3>面談メモ</h3>
+          <label>面談メモ
+            <textarea data-field="meetingMemo" rows="6" placeholder="相談の背景、家族関係の温度感、未確認事項など"></textarea>
+          </label>
+        </div>
 
         <div class="notice">
           <strong>このツールの位置づけ</strong>
@@ -99,48 +105,63 @@
           <button class="source-btn" data-source="inheritance_basic">根拠</button>
         </div>
 
-        <div class="grid three">
-          <label>配偶者
-            <select data-field="hasSpouse">
-              <option value="yes">あり</option>
-              <option value="no">なし</option>
-            </select>
-          </label>
-          <label>配偶者年齢
-            <input data-field="spouseAge" type="number" min="0" step="1" />
-          </label>
-          <label>配偶者固有財産 概算
-            <input data-field="spouseOwnAssets" data-money inputmode="numeric" placeholder="例：20,000,000" />
-          </label>
-          <label>二次相続までの生活費消費見込
-            <input data-field="spouseFutureConsumption" data-money inputmode="numeric" placeholder="例：15,000,000" />
-          </label>
-          <label>実子・代襲相続人の人数
-            <input data-field="childrenCount" type="number" min="0" step="1" />
-          </label>
-          <label>養子の人数
-            <input data-field="adoptedCount" type="number" min="0" step="1" />
-          </label>
-          <label>父母等の直系尊属人数（子なしの場合）
-            <input data-field="parentsCount" type="number" min="0" step="1" />
-          </label>
-          <label>兄弟姉妹・代襲相続人の人数（子・直系尊属なしの場合）
-            <input data-field="siblingsCount" type="number" min="0" step="1" />
-          </label>
-          <label>同居親族あり
-            <select data-field="coResident">
-              <option value="unknown">未確認</option>
-              <option value="yes">あり</option>
-              <option value="no">なし</option>
-            </select>
-          </label>
-          <label>住宅取得予定の子・孫
-            <select data-field="homePlanChild">
-              <option value="unknown">未確認</option>
-              <option value="yes">あり</option>
-              <option value="no">なし</option>
-            </select>
-          </label>
+        <div class="input-group">
+          <h3>配偶者・二次相続前提</h3>
+          <div class="grid two">
+            <label>配偶者
+              <select data-field="hasSpouse">
+                <option value="yes">あり</option>
+                <option value="no">なし</option>
+              </select>
+            </label>
+            <label>配偶者年齢
+              <input data-field="spouseAge" type="number" min="0" step="1" />
+            </label>
+            <label>配偶者固有財産 概算
+              <input data-field="spouseOwnAssets" data-money inputmode="numeric" placeholder="例：20,000,000" />
+            </label>
+            <label>二次相続までの生活費消費見込
+              <input data-field="spouseFutureConsumption" data-money inputmode="numeric" placeholder="例：15,000,000" />
+            </label>
+          </div>
+        </div>
+
+        <div class="input-group">
+          <h3>法定相続人の人数</h3>
+          <div class="grid two">
+            <label>実子・代襲相続人の人数
+              <input data-field="childrenCount" type="number" min="0" step="1" />
+            </label>
+            <label>養子の人数
+              <input data-field="adoptedCount" type="number" min="0" step="1" />
+            </label>
+            <label>父母等の直系尊属人数（子なしの場合）
+              <input data-field="parentsCount" type="number" min="0" step="1" />
+            </label>
+            <label>兄弟姉妹・代襲相続人の人数（子・直系尊属なしの場合）
+              <input data-field="siblingsCount" type="number" min="0" step="1" />
+            </label>
+          </div>
+        </div>
+
+        <div class="input-group">
+          <h3>制度要件の初期確認</h3>
+          <div class="grid two">
+            <label>同居親族あり
+              <select data-field="coResident">
+                <option value="unknown">未確認</option>
+                <option value="yes">あり</option>
+                <option value="no">なし</option>
+              </select>
+            </label>
+            <label>住宅取得予定の子・孫
+              <select data-field="homePlanChild">
+                <option value="unknown">未確認</option>
+                <option value="yes">あり</option>
+                <option value="no">なし</option>
+              </select>
+            </label>
+          </div>
         </div>
 
         <div class="result-cards" id="familyResults"></div>
@@ -163,34 +184,49 @@
           <button class="source-btn" data-source="inheritance_tax_rate">根拠</button>
         </div>
 
-        <div class="grid three">
-          <label>現預金
-            <input data-field="cash" data-money inputmode="numeric" placeholder="例：30,000,000" />
-          </label>
-          <label>上場株式・投信等
-            <input data-field="securities" data-money inputmode="numeric" placeholder="例：10,000,000" />
-          </label>
-          <label>自宅土地建物 評価概算
-            <input data-field="homeProperty" data-money inputmode="numeric" placeholder="例：40,000,000" />
-          </label>
-          <label>貸付不動産 評価概算
-            <input data-field="rentalProperty" data-money inputmode="numeric" placeholder="例：20,000,000" />
-          </label>
-          <label>非上場株式・事業用資産
-            <input data-field="businessAssets" data-money inputmode="numeric" placeholder="例：50,000,000" />
-          </label>
-          <label>その他財産
-            <input data-field="otherAssets" data-money inputmode="numeric" placeholder="例：5,000,000" />
-          </label>
-          <label>借入金・債務
-            <input data-field="debts" data-money inputmode="numeric" placeholder="例：10,000,000" />
-          </label>
-          <label>葬式費用見込
-            <input data-field="funeralCosts" data-money inputmode="numeric" placeholder="例：2,000,000" />
-          </label>
-          <label>納税資金として残したい現金
-            <input data-field="cashReserveTarget" data-money inputmode="numeric" placeholder="例：5,000,000" />
-          </label>
+        <div class="input-group">
+          <h3>換金しやすい資産</h3>
+          <div class="grid two">
+            <label>現預金
+              <input data-field="cash" data-money inputmode="numeric" placeholder="例：30,000,000" />
+            </label>
+            <label>上場株式・投信等
+              <input data-field="securities" data-money inputmode="numeric" placeholder="例：10,000,000" />
+            </label>
+          </div>
+        </div>
+
+        <div class="input-group">
+          <h3>評価・分割確認が必要な資産</h3>
+          <div class="grid two">
+            <label>自宅土地建物 評価概算
+              <input data-field="homeProperty" data-money inputmode="numeric" placeholder="例：40,000,000" />
+            </label>
+            <label>貸付不動産 評価概算
+              <input data-field="rentalProperty" data-money inputmode="numeric" placeholder="例：20,000,000" />
+            </label>
+            <label>非上場株式・事業用資産
+              <input data-field="businessAssets" data-money inputmode="numeric" placeholder="例：50,000,000" />
+            </label>
+            <label>その他財産
+              <input data-field="otherAssets" data-money inputmode="numeric" placeholder="例：5,000,000" />
+            </label>
+          </div>
+        </div>
+
+        <div class="input-group">
+          <h3>控除・納税資金</h3>
+          <div class="grid two">
+            <label>借入金・債務
+              <input data-field="debts" data-money inputmode="numeric" placeholder="例：10,000,000" />
+            </label>
+            <label>葬式費用見込
+              <input data-field="funeralCosts" data-money inputmode="numeric" placeholder="例：2,000,000" />
+            </label>
+            <label>生活費・予備資金として残したい現金
+              <input data-field="cashReserveTarget" data-money inputmode="numeric" placeholder="例：5,000,000" />
+            </label>
+          </div>
         </div>
 
         <div class="result-cards" id="assetResults"></div>
@@ -210,69 +246,96 @@
           <button class="source-btn" data-source="annual_gift">根拠</button>
         </div>
 
-        <div class="grid three">
-          <label>死亡保険金総額
-            <input data-field="lifeInsurance" data-money inputmode="numeric" placeholder="例：10,000,000" />
-          </label>
-          <label>受取人が相続人である保険金
-            <input data-field="lifeInsuranceHeirs" data-money inputmode="numeric" placeholder="例：10,000,000" />
-          </label>
-          <label>過去贈与の概算加算額
-            <input data-field="priorGiftsAddBack" data-money inputmode="numeric" placeholder="例：3,000,000" />
-          </label>
-          <label>生前贈与加算の反映方法
-            <select data-field="priorGiftMode">
-              <option value="auto">下の入力から自動目安</option>
-              <option value="manual">概算加算額を直接使用</option>
-            </select>
-          </label>
-          <label>相続開始の想定年
-            <input data-field="assumedInheritanceYear" type="number" min="2024" step="1" />
-          </label>
-          <label>開始前3年以内の暦年贈与
-            <input data-field="giftsWithin3Years" data-money inputmode="numeric" placeholder="例：3,000,000" />
-          </label>
-          <label>4〜7年内の贈与候補
-            <input data-field="giftsYears4to7" data-money inputmode="numeric" placeholder="例：4,000,000" />
-          </label>
-          <label>年間贈与額 / 人
-            <input data-field="annualGiftPerPerson" data-money inputmode="numeric" placeholder="例：1,100,000" />
-          </label>
-          <label>贈与対象人数
-            <input data-field="annualGiftRecipients" type="number" min="0" step="1" />
-          </label>
-          <label>継続年数
-            <input data-field="annualGiftYears" type="number" min="0" step="1" />
-          </label>
-          <label>暦年贈与の税率区分
-            <select data-field="giftRateType">
-              <option value="special">特例税率（直系尊属→18歳以上の子・孫）</option>
-              <option value="general">一般税率</option>
-            </select>
-          </label>
-          <label>相続時精算課税 贈与予定額
-            <input data-field="settlementGift" data-money inputmode="numeric" placeholder="例：25,000,000" />
-          </label>
-          <label>相続時精算課税 既使用特別控除額
-            <input data-field="settlementDeductionUsed" data-money inputmode="numeric" placeholder="例：0" />
-          </label>
-          <label>住宅取得等資金贈与予定額
-            <input data-field="housingGift" data-money inputmode="numeric" placeholder="例：10,000,000" />
-          </label>
-          <label>住宅区分
-            <select data-field="housingType">
-              <option value="eco">省エネ等住宅</option>
-              <option value="other">その他住宅</option>
-              <option value="unknown">未確認</option>
-            </select>
-          </label>
-          <label>夫婦間居住用不動産贈与
-            <select data-field="spouseHomeGift">
-              <option value="unknown">未確認</option>
-              <option value="possible">可能性あり</option>
-              <option value="no">該当なし</option>
-            </select>
-          </label>
+        <div class="input-group">
+          <h3>生命保険</h3>
+          <div class="grid two">
+            <label>死亡保険金総額
+              <input data-field="lifeInsurance" data-money inputmode="numeric" placeholder="例：10,000,000" />
+            </label>
+            <label>受取人が相続人である保険金
+              <input data-field="lifeInsuranceHeirs" data-money inputmode="numeric" placeholder="例：10,000,000" />
+            </label>
+          </div>
+        </div>
+
+        <div class="input-group">
+          <h3>生前贈与加算</h3>
+          <div class="grid two">
+            <label>過去贈与の概算加算額
+              <input data-field="priorGiftsAddBack" data-money inputmode="numeric" placeholder="例：3,000,000" />
+            </label>
+            <label>生前贈与加算の反映方法
+              <select data-field="priorGiftMode">
+                <option value="auto">下の入力から自動目安</option>
+                <option value="manual">概算加算額を直接使用</option>
+              </select>
+            </label>
+            <label>相続開始の想定年
+              <input data-field="assumedInheritanceYear" type="number" min="2024" step="1" />
+            </label>
+            <label>開始前3年以内の暦年贈与
+              <input data-field="giftsWithin3Years" data-money inputmode="numeric" placeholder="例：3,000,000" />
+            </label>
+            <label>4〜7年内の贈与候補
+              <input data-field="giftsYears4to7" data-money inputmode="numeric" placeholder="例：4,000,000" />
+            </label>
+          </div>
+        </div>
+
+        <div class="input-group">
+          <h3>暦年贈与シミュレーション</h3>
+          <div class="grid two">
+            <label>年間贈与額 / 人
+              <input data-field="annualGiftPerPerson" data-money inputmode="numeric" placeholder="例：1,100,000" />
+            </label>
+            <label>贈与対象人数
+              <input data-field="annualGiftRecipients" type="number" min="0" step="1" />
+            </label>
+            <label>継続年数
+              <input data-field="annualGiftYears" type="number" min="0" step="1" />
+            </label>
+            <label>暦年贈与の税率区分
+              <select data-field="giftRateType">
+                <option value="special">特例税率（直系尊属→18歳以上の子・孫）</option>
+                <option value="general">一般税率</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <div class="input-group">
+          <h3>相続時精算課税</h3>
+          <div class="grid two">
+            <label>相続時精算課税 贈与予定額
+              <input data-field="settlementGift" data-money inputmode="numeric" placeholder="例：25,000,000" />
+            </label>
+            <label>相続時精算課税 既使用特別控除額
+              <input data-field="settlementDeductionUsed" data-money inputmode="numeric" placeholder="例：0" />
+            </label>
+          </div>
+        </div>
+
+        <div class="input-group">
+          <h3>住宅・配偶者特例候補</h3>
+          <div class="grid two">
+            <label>住宅取得等資金贈与予定額
+              <input data-field="housingGift" data-money inputmode="numeric" placeholder="例：10,000,000" />
+            </label>
+            <label>住宅区分
+              <select data-field="housingType">
+                <option value="eco">省エネ等住宅</option>
+                <option value="other">その他住宅</option>
+                <option value="unknown">未確認</option>
+              </select>
+            </label>
+            <label>夫婦間居住用不動産贈与
+              <select data-field="spouseHomeGift">
+                <option value="unknown">未確認</option>
+                <option value="possible">可能性あり</option>
+                <option value="no">該当なし</option>
+              </select>
+            </label>
+          </div>
         </div>
 
         <div class="result-cards" id="giftResults"></div>
@@ -361,9 +424,12 @@
           <div id="taskSuggestions"></div>
         </div>
 
-        <label>次回までの確認資料・宿題
-          <textarea data-field="nextTasks" rows="6" placeholder="固定資産税課税明細、保険証券、過去贈与一覧、家族の意向確認など"></textarea>
-        </label>
+        <div class="input-group">
+          <h3>宿題メモ</h3>
+          <label>次回までの確認資料・宿題
+            <textarea data-field="nextTasks" rows="6" placeholder="固定資産税課税明細、保険証券、過去贈与一覧、家族の意向確認など"></textarea>
+          </label>
+        </div>
       </section>
 
       <section class="panel tab-panel" id="report">

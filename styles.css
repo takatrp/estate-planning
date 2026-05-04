@@ -51,14 +51,30 @@ h1{font-size:clamp(1.7rem,3vw,2.5rem);line-height:1.2;margin:0}
 .section-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:18px}
 .section-head h2,.side-panel h2{margin:0;font-size:1.35rem}
 .section-head p{margin:.25rem 0 0;color:var(--muted)}
-.grid{display:grid;gap:14px;margin:16px 0}
+.grid{display:grid;gap:0;margin:16px 0;border:1px solid var(--line);border-radius:16px;overflow:hidden;background:#fff}
 .grid.two{grid-template-columns:repeat(2,minmax(0,1fr))}
 .grid.three{grid-template-columns:repeat(3,minmax(0,1fr))}
+.input-group{
+  border:1px solid var(--line);border-radius:16px;overflow:hidden;background:#fff;margin:16px 0
+}
+.input-group h3{
+  margin:0;padding:10px 14px;background:#f1f6f8;color:#334155;font-size:.98rem;border-bottom:1px solid var(--line)
+}
+.input-group .grid{margin:0;border:0;border-radius:0}
 label{display:block;font-weight:700;color:#263445}
 input,select,textarea{
-  width:100%;margin-top:6px;border:1px solid var(--line);border-radius:14px;padding:10px 12px;background:#fff;color:var(--ink)
+  width:100%;margin-top:0;border:1px solid var(--line);border-radius:10px;padding:9px 11px;background:#fff;color:var(--ink)
 }
 textarea{resize:vertical}
+.grid label,.action-fields label,.panel>label,.input-group>label{
+  display:grid;grid-template-columns:minmax(10.5rem,38%) minmax(0,1fr);gap:10px;align-items:center;
+  margin:0;padding:11px 12px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);background:#fff
+}
+.grid.two label:nth-child(2n),.grid.three label:nth-child(3n){border-right:0}
+.panel>label{border:1px solid var(--line);border-radius:16px;margin:16px 0;overflow:hidden}
+.input-group>label{border:0}
+.panel>label textarea,.input-group>label textarea{min-height:120px}
+.grid label:has(textarea),.panel>label:has(textarea),.input-group>label:has(textarea){align-items:start}
 .result-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:18px 0}
 .metric-card{
   border:1px solid var(--line);border-radius:18px;background:#fff;padding:15px;min-height:112px
@@ -126,6 +142,7 @@ tr:last-child td{border-bottom:0}
   .layout{grid-template-columns:1fr}
   .side-panel{position:static}
   .grid.three,.grid.two,.result-cards,.summary-band,.source-list,.report-grid{grid-template-columns:1fr}
+  .grid.two label,.grid.three label{border-right:0}
   .app-header{display:block}
   .header-actions{margin-top:16px;justify-content:flex-start;min-width:0}
 }
@@ -156,7 +173,7 @@ input::-moz-placeholder,textarea::-moz-placeholder{color:#c7d1d8;opacity:1}
 .action-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:8px}
 .check-label{display:flex;gap:9px;align-items:flex-start;font-weight:800;color:var(--ink)}
 .check-label input{width:auto;margin-top:4px;accent-color:var(--brand)}
-.action-fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:12px 0}
+.action-fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0;margin:12px 0;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:#fff}
 .action-fields label{font-size:.9rem}
-@media (max-width:980px){.before-after,.action-fields{grid-template-columns:1fr}}
+@media (max-width:980px){.before-after,.action-fields{grid-template-columns:1fr}.grid.two label,.grid.three label,.action-fields label{border-right:0}}
 @media print{.before-after{grid-template-columns:repeat(3,1fr)}.action-fields{grid-template-columns:repeat(3,1fr)}}

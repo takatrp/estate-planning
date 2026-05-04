@@ -500,8 +500,8 @@ function render() {
     ["正味財産", yen(e.netEstate), "概算"],
     ["課税遺産総額", yen(e.taxableEstate), "正味財産 − 基礎控除"],
     ["相続税総額 概算", yen(e.inheritanceTaxTotal), "税額控除前の概算"],
-    ["現預金", yen(num(state.cash)), "納税資金候補"],
-    ["納税資金不足目安", yen(Math.max(0, e.inheritanceTaxTotal - (num(state.cash) - num(state.cashReserveTarget)))), "現預金から留保目標を控除"],
+    ["現預金総額", yen(num(state.cash)), "生活費・予備資金を含む"],
+    ["納税資金不足目安", yen(Math.max(0, e.inheritanceTaxTotal - (num(state.cash) - num(state.cashReserveTarget)))), "現預金から生活費・予備資金を控除"],
     ["生前贈与加算額", yen(e.priorGiftAddBack), "相続税の課税価格に加算する概算"]
   ]);
 
@@ -604,7 +604,7 @@ function renderActionComparison() {
     ["正味財産", effect.before.netEstate, effect.after.netEstate, effect.before.netEstate - effect.after.netEstate],
     ["課税遺産総額", effect.before.taxableEstate, effect.after.taxableEstate, effect.taxableEstateReduction],
     ["相続税総額概算", effect.before.inheritanceTaxTotal, effect.after.inheritanceTaxTotal, effect.taxReduction],
-    ["納税資金不足目安", beforeCashShortage, afterCashShortage, beforeCashShortage - afterCashShortage],
+    ["納税資金不足目安（生活費等を除く）", beforeCashShortage, afterCashShortage, beforeCashShortage - afterCashShortage],
     ["死亡保険金非課税利用額", effect.before.insuranceExemption, effect.after.insuranceExemption, effect.after.insuranceExemption - effect.before.insuranceExemption],
     ["贈与税等概算コスト", 0, effect.giftTaxCost, -effect.giftTaxCost]
   ];
