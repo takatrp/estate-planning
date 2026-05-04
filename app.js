@@ -9,6 +9,7 @@ const defaults = {
   hasSpouse: "yes",
   spouseAge: "",
   spouseOwnAssets: 0,
+  spouseFutureConsumption: 0,
   childrenCount: 2,
   adoptedCount: 0,
   parentsCount: 0,
@@ -27,6 +28,10 @@ const defaults = {
   lifeInsurance: 0,
   lifeInsuranceHeirs: 0,
   priorGiftsAddBack: 0,
+  priorGiftMode: "auto",
+  assumedInheritanceYear: new Date().getFullYear(),
+  giftsWithin3Years: 0,
+  giftsYears4to7: 0,
   annualGiftPerPerson: 1100000,
   annualGiftRecipients: 2,
   annualGiftYears: 5,
@@ -54,8 +59,8 @@ const defaults = {
 };
 
 const moneyFields = new Set([
-  "spouseOwnAssets", "cash", "securities", "homeProperty", "rentalProperty", "businessAssets", "otherAssets",
-  "debts", "funeralCosts", "cashReserveTarget", "lifeInsurance", "lifeInsuranceHeirs", "priorGiftsAddBack",
+  "spouseOwnAssets", "spouseFutureConsumption", "cash", "securities", "homeProperty", "rentalProperty", "businessAssets", "otherAssets",
+  "debts", "funeralCosts", "cashReserveTarget", "lifeInsurance", "lifeInsuranceHeirs", "priorGiftsAddBack", "giftsWithin3Years", "giftsYears4to7",
   "annualGiftPerPerson", "settlementGift", "settlementDeductionUsed", "housingGift",
   "actionAnnualGiftPerPerson", "actionHousingGiftAmount", "actionLifeInsuranceAmount", "actionSpouseHomeGiftAmount",
   "actionSettlementAmount", "actionCustomReductionAmount"
@@ -66,7 +71,7 @@ let state = normalizeState({ ...defaults });
 function normalizeState(input) {
   const out = { ...defaults, ...input };
   for (const field of moneyFields) out[field] = toNumber(out[field]);
-  ["childrenCount", "adoptedCount", "parentsCount", "siblingsCount", "annualGiftRecipients", "annualGiftYears", "actionAnnualGiftRecipients", "actionAnnualGiftYears"].forEach((field) => {
+  ["childrenCount", "adoptedCount", "parentsCount", "siblingsCount", "annualGiftRecipients", "annualGiftYears", "actionAnnualGiftRecipients", "actionAnnualGiftYears", "assumedInheritanceYear"].forEach((field) => {
     out[field] = Math.max(0, Math.floor(toNumber(out[field])));
   });
   ["actionAnnualGiftEnabled", "actionHousingGiftEnabled", "actionLifeInsuranceEnabled", "actionSpouseHomeGiftEnabled", "actionSettlementEnabled", "actionCustomReductionEnabled"].forEach((field) => {
@@ -91,6 +96,7 @@ const comma = (v) => {
   return n.toLocaleString("ja-JP");
 };
 const pct = (v) => `${Math.round(v * 100)}%`;
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c]));
 
 function applyRate(amount, rates) {
   const taxable = Math.max(0, Math.floor(amount));
@@ -158,21 +164,47 @@ function getHeirInfo(input = state) {
   };
 }
 
+function calcGiftAddBack(input = state) {
+  const year = Math.max(2024, Math.floor(num(input.assumedInheritanceYear)) || new Date().getFullYear());
+  const addBackYears = year <= 2026 ? 3 : Math.min(7, 3 + (year - 2026));
+  const extendedRatio = Math.max(0, addBackYears - 3) / 4;
+  const extendedCandidate = num(input.giftsYears4to7) * extendedRatio;
+  const extendedAddBack = extendedRatio > 0 ? Math.max(0, extendedCandidate - 1000000) : 0;
+  const autoAddBack = num(input.giftsWithin3Years) + extendedAddBack;
+  const effectiveAddBack = input.priorGiftMode === "manual" ? num(input.priorGiftsAddBack) : autoAddBack;
+  const note = addBackYears === 7
+    ? "4〜7年内部分は総額から100万円を控除した後に加算する前提です。"
+    : addBackYears > 3
+      ? "4〜7年内部分は日付別入力ではないため、移行年数に応じた目安です。実行前に贈与日別で確認してください。"
+      : "3年以内の暦年贈与を加算対象として扱う目安です。";
+  return {
+    year,
+    addBackYears,
+    extendedRatio,
+    extendedCandidate,
+    extendedAddBack,
+    autoAddBack,
+    effectiveAddBack,
+    note
+  };
+}
+
 function calcEstate(input = state) {
   const heirs = getHeirInfo(input);
   const insuranceExemption = Math.min(num(input.lifeInsuranceHeirs), 5000000 * heirs.heirsForTax);
   const taxableInsurance = Math.max(0, num(input.lifeInsurance) - insuranceExemption);
+  const priorGift = calcGiftAddBack(input);
   const grossAssets =
     num(input.cash) + num(input.securities) + num(input.homeProperty) +
     num(input.rentalProperty) + num(input.businessAssets) + num(input.otherAssets) +
-    taxableInsurance + num(input.priorGiftsAddBack);
+    taxableInsurance + priorGift.effectiveAddBack;
   const deductions = num(input.debts) + num(input.funeralCosts);
   const netEstate = Math.max(0, grossAssets - deductions);
   const taxableEstate = Math.max(0, netEstate - heirs.basicDeduction);
   const inheritanceTaxTotal = calcInheritanceTaxTotal(taxableEstate, heirs);
   const illiquid = num(input.homeProperty) + num(input.rentalProperty) + num(input.businessAssets);
   const illiquidRatio = grossAssets ? illiquid / grossAssets : 0;
-  return { heirs, insuranceExemption, taxableInsurance, grossAssets, deductions, netEstate, taxableEstate, inheritanceTaxTotal, illiquid, illiquidRatio };
+  return { heirs, insuranceExemption, taxableInsurance, priorGiftAddBack: priorGift.effectiveAddBack, grossAssets, deductions, netEstate, taxableEstate, inheritanceTaxTotal, illiquid, illiquidRatio };
 }
 
 function calcInheritanceTaxTotal(taxableEstate, heirs) {
@@ -210,7 +242,7 @@ function calcSpouseScenario(spouseShare) {
   const spouseRelief = spouseAcquisition <= spouseReliefLimit ? spouseTaxBefore : spouseTaxBefore * (spouseReliefLimit / Math.max(spouseAcquisition, 1));
   const firstTax = Math.max(0, totalTaxBeforeCredit - spouseRelief);
 
-  const secondEstate = num(state.spouseOwnAssets) + spouseAcquisition;
+  const secondEstate = Math.max(0, num(state.spouseOwnAssets) + spouseAcquisition - num(state.spouseFutureConsumption));
   const secondHeirsInput = {
     ...state,
     hasSpouse: "no",
@@ -256,9 +288,9 @@ function calcGift(input = state) {
 
   const housingLimit = input.housingType === "eco" ? 10000000 : input.housingType === "other" ? 5000000 : 0;
   const housingTaxable = Math.max(0, num(input.housingGift) - housingLimit);
-  const housingGiftTax = applyRate(housingTaxable, TaxRules.giftTaxRates[input.giftRateType] || TaxRules.giftTaxRates.special);
+  const housingGiftTax = input.housingType === "unknown" ? 0 : applyRate(housingTaxable, TaxRules.giftTaxRates[input.giftRateType] || TaxRules.giftTaxRates.special);
 
-  return { annualTaxable, annualGiftTaxPerPerson, totalAnnualGift, totalAnnualGiftTax, settlementBase, remainingSpecial, settlementTaxable, settlementTax, housingLimit, housingTaxable, housingGiftTax };
+  return { annualTaxable, annualGiftTaxPerPerson, totalAnnualGift, totalAnnualGiftTax, settlementBase, remainingSpecial, settlementTaxable, settlementTax, housingLimit, housingTaxable, housingGiftTax, giftAddBack: calcGiftAddBack(input) };
 }
 
 function calcActionEffect() {
@@ -288,13 +320,17 @@ function calcActionEffect() {
 
   if (state.actionHousingGiftEnabled) {
     const limit = state.housingType === "eco" ? 10000000 : state.housingType === "other" ? 5000000 : 0;
-    const applied = Math.min(num(state.actionHousingGiftAmount), limit || num(state.actionHousingGiftAmount));
-    const taxable = Math.max(0, num(state.actionHousingGiftAmount) - limit);
-    const tax = limit ? applyRate(taxable, TaxRules.giftTaxRates[state.giftRateType] || TaxRules.giftTaxRates.special) : 0;
-    afterInput.cash = Math.max(0, num(afterInput.cash) - applied);
-    transferAmount += applied;
-    giftTaxCost += tax;
-    notes.push(`住宅取得等資金贈与：非課税枠を前提に${yen(applied)}を財産から控除。住宅要件・期限・所得要件は要確認です。`);
+    const amount = num(state.actionHousingGiftAmount);
+    if (!limit) {
+      notes.push("住宅取得等資金贈与：住宅区分が未確認のため、相続税圧縮効果には反映していません。要件確認後に再計算してください。");
+    } else {
+      const taxable = Math.max(0, amount - limit);
+      const tax = applyRate(taxable, TaxRules.giftTaxRates[state.giftRateType] || TaxRules.giftTaxRates.special);
+      afterInput.cash = Math.max(0, num(afterInput.cash) - amount);
+      transferAmount += amount;
+      giftTaxCost += tax;
+      notes.push(`住宅取得等資金贈与：${yen(amount)}を財産から控除。非課税枠 ${yen(limit)}、超過部分の贈与税概算 ${yen(tax)}。住宅要件・期限・所得要件は要確認です。`);
+    }
   }
 
   if (state.actionLifeInsuranceEnabled) {
@@ -368,6 +404,35 @@ function diagnoseRisks(input = state) {
   return { taxRisk, cashRisk, splitRisk, secondRisk };
 }
 
+function getUnreflectedItems(input = state) {
+  const items = [
+    "実行判断・申告計算では、土地評価、評価単位、路線価補正、貸家建付地等を個別確認",
+    "遺産分割、遺留分、名義預金、過去贈与の証拠関係は本ツール外で確認"
+  ];
+  if (num(input.homeProperty) || num(input.rentalProperty)) items.unshift("小規模宅地等の特例は未反映");
+  if (num(input.businessAssets)) items.unshift("非上場株式・事業用資産評価、事業承継税制は未反映");
+  if (num(input.siblingsCount) > 0) items.push("相続税額の2割加算の対象者判定は未反映");
+  if (num(input.spouseAge) < 20 && num(input.spouseAge) > 0) items.push("未成年者控除などの税額控除は未反映");
+  if (input.priorGiftMode === "auto") items.push("生前贈与加算の4〜7年部分は日付別ではなく年数比の目安");
+  return [...new Set(items)];
+}
+
+function getTaskSuggestions(input = state) {
+  const e = calcEstate(input);
+  const r = diagnoseRisks(input);
+  const tasks = [];
+  if (input.coResident === "unknown" && (num(input.homeProperty) || num(input.rentalProperty))) tasks.push("同居親族・家なき子・事業/貸付継続など、小規模宅地等の特例要件を確認");
+  if (input.homePlanChild === "unknown" && (input.actionHousingGiftEnabled || num(input.housingGift))) tasks.push("住宅取得予定者、住宅区分、契約日、入居日、所得要件、証明書類を確認");
+  if (input.housingType === "unknown" && (input.actionHousingGiftEnabled || num(input.housingGift))) tasks.push("住宅取得等資金贈与は住宅区分が未確認のため、非課税枠を確定");
+  if (num(input.lifeInsurance) || input.actionLifeInsuranceEnabled) tasks.push("保険証券で契約者・被保険者・受取人・保険料負担者を確認");
+  if (input.priorGiftMode === "auto" || num(input.priorGiftsAddBack)) tasks.push("過去贈与を贈与日・贈与者・受贈者・金額・申告有無で一覧化");
+  if (r.cashRisk !== "低") tasks.push("納税資金として使える現預金、換金可能資産、保険金入金時期を確認");
+  if (r.splitRisk !== "低") tasks.push("不動産・事業資産の分割方針、代償金、共有回避の希望を確認");
+  if (r.secondRisk !== "低") tasks.push("配偶者固有財産、生活費消費見込、二次相続時の相続人を確認");
+  if (e.taxableEstate > 0) tasks.push("固定資産税課税明細、路線価図、借入金残高、葬式費用見込を回収");
+  return [...new Set(tasks)];
+}
+
 function makeCard(label, value, note = "") {
   const tpl = document.getElementById("cardTemplate");
   const node = tpl.content.firstElementChild.cloneNode(true);
@@ -404,6 +469,7 @@ function render() {
   const e = calcEstate(state);
   const g = calcGift(state);
   const risks = diagnoseRisks(state);
+  const giftAddBackLabel = state.priorGiftMode === "manual" ? "手入力" : `${g.giftAddBack.addBackYears}年目安`;
 
   renderCards("familyResults", [
     ["法定相続人の数（税額計算用）", `${e.heirs.heirsForTax}人`, `養子算入：${e.heirs.adoptedForTax}人 / 相続順位：${e.heirs.rank}`],
@@ -424,6 +490,7 @@ function render() {
     ["暦年贈与税 / 人・年", yen(g.annualGiftTaxPerPerson), `課税価格 ${yen(g.annualTaxable)}`],
     ["暦年贈与 移転総額", yen(g.totalAnnualGift), `${state.annualGiftRecipients || 0}人 × ${state.annualGiftYears || 0}年`],
     ["暦年贈与税 合計概算", yen(g.totalAnnualGiftTax), "生前贈与加算対象期間に注意"],
+    ["相続財産へ加算する贈与額", yen(e.priorGiftAddBack), giftAddBackLabel],
     ["相続時精算課税 贈与税概算", yen(g.settlementTax), `残特別控除 ${yen(g.remainingSpecial)}`],
     ["住宅資金贈与 非課税枠", yen(g.housingLimit), "要件・期限・証明書類の確認が必要"],
     ["住宅資金贈与 課税候補", yen(g.housingTaxable), "暦年または精算課税との関係を確認"]
@@ -435,15 +502,47 @@ function render() {
     ["相続税総額 概算", yen(e.inheritanceTaxTotal), "税額控除前の概算"],
     ["現預金", yen(num(state.cash)), "納税資金候補"],
     ["納税資金不足目安", yen(Math.max(0, e.inheritanceTaxTotal - (num(state.cash) - num(state.cashReserveTarget)))), "現預金から留保目標を控除"],
-    ["過去贈与加算入力額", yen(num(state.priorGiftsAddBack)), "加算対象期間・相手方を確認"]
+    ["生前贈与加算額", yen(e.priorGiftAddBack), "相続税の課税価格に加算する概算"]
   ]);
 
+  renderGiftAddBackNotice(g);
   renderRiskBand(risks);
+  renderUnreflectedItems();
   renderSpouseScenarios();
   renderActionComparison();
   if (!document.activeElement || !document.activeElement.closest("#actionList") || document.activeElement.type === "checkbox") renderActionCards();
+  renderTaskSuggestions();
   renderSources();
+  renderReport();
   renderSummary();
+}
+
+function renderGiftAddBackNotice(g) {
+  const el = document.getElementById("giftAddBackNotice");
+  if (!el) return;
+  el.innerHTML = `
+    <strong>生前贈与加算チェック</strong>
+    <p>
+      想定年 ${g.giftAddBack.year}年では、加算対象期間を ${g.giftAddBack.addBackYears}年として扱います。
+      自動目安は ${yen(g.giftAddBack.autoAddBack)}、現在の計算反映額は ${yen(g.giftAddBack.effectiveAddBack)} です。
+      ${g.giftAddBack.note}
+    </p>
+  `;
+}
+
+function renderList(el, items, emptyText = "現在の入力では自動抽出項目はありません。") {
+  if (!el) return;
+  el.innerHTML = items.length ? `<ul class="checklist">${items.map((item) => `<li>${esc(item)}</li>`).join("")}</ul>` : `<p class="muted-text">${emptyText}</p>`;
+}
+
+function renderUnreflectedItems() {
+  renderList(document.getElementById("unreflectedItems"), getUnreflectedItems(state));
+}
+
+function renderTaskSuggestions() {
+  const tasks = getTaskSuggestions(state);
+  renderList(document.getElementById("taskSuggestions"), tasks);
+  renderList(document.getElementById("sideTasks"), tasks.slice(0, 4), "未確認事項はまだ抽出されていません。");
 }
 
 function renderRiskBand(risks) {
@@ -623,6 +722,48 @@ function renderSources() {
   });
 }
 
+function renderReport() {
+  const wrap = document.getElementById("reportView");
+  if (!wrap) return;
+  const e = calcEstate(state);
+  const r = diagnoseRisks(state);
+  const effect = calcActionEffect();
+  const tasks = getTaskSuggestions(state);
+  const unreflected = getUnreflectedItems(state);
+  const selectedActions = actionDefinitions().filter((def) => state[def.enabled]).map((def) => def.title);
+  const riskText = `税:${r.taxRisk} / 資金:${r.cashRisk} / 分割:${r.splitRisk} / 二次:${r.secondRisk}`;
+  wrap.innerHTML = `
+    <section class="report-block">
+      <h3>${esc(state.caseName || "資産承継 面談メモ")}</h3>
+      <p>${esc(state.meetingDate || "")}　担当：${esc(state.staffName || "")}</p>
+      <div class="report-grid">
+        <div><span>正味財産</span><b>${yen(e.netEstate)}</b></div>
+        <div><span>基礎控除</span><b>${yen(e.heirs.basicDeduction)}</b></div>
+        <div><span>相続税総額概算</span><b>${yen(e.inheritanceTaxTotal)}</b></div>
+        <div><span>打ち手後概算</span><b>${yen(effect.after.inheritanceTaxTotal)}</b></div>
+      </div>
+    </section>
+    <section class="report-block">
+      <h3>主な見立て</h3>
+      <p>法定相続人 ${e.heirs.heirsForTax}人、相続順位 ${esc(e.heirs.rank)}。リスク判定は ${esc(riskText)} です。</p>
+      <p>生前贈与加算は ${yen(e.priorGiftAddBack)} を計算に反映しています。配偶者取得割合は一次相続だけでなく二次相続と生活資金を合わせて確認してください。</p>
+    </section>
+    <section class="report-block">
+      <h3>検討した打ち手</h3>
+      ${selectedActions.length ? `<ul>${selectedActions.map((a) => `<li>${esc(a)}</li>`).join("")}</ul>` : "<p>打ち手候補は未選択です。</p>"}
+    </section>
+    <section class="report-block">
+      <h3>次回までの確認事項</h3>
+      ${tasks.length ? `<ul>${tasks.map((task) => `<li>${esc(task)}</li>`).join("")}</ul>` : "<p>自動抽出された確認事項はありません。</p>"}
+      ${state.nextTasks ? `<p><strong>手入力メモ：</strong>${esc(state.nextTasks).replace(/\n/g, "<br>")}</p>` : ""}
+    </section>
+    <section class="report-block">
+      <h3>未反映・注意事項</h3>
+      <ul>${unreflected.map((item) => `<li>${esc(item)}</li>`).join("")}</ul>
+    </section>
+  `;
+}
+
 function renderSummary() {
   const e = calcEstate(state);
   const r = diagnoseRisks(state);
@@ -716,6 +857,11 @@ document.getElementById("loadBtn").addEventListener("click", () => {
   if (!saved) return alert("保存データがありません。");
   state = normalizeState(JSON.parse(saved));
   render();
+});
+document.getElementById("clearSaveBtn").addEventListener("click", () => {
+  if (!confirm("このブラウザ内の一時保存データを削除します。よろしいですか？")) return;
+  localStorage.removeItem("shisan-shokei-navi");
+  alert("一時保存データを削除しました。");
 });
 document.getElementById("exportBtn").addEventListener("click", () => {
   collectStateFromInputs();

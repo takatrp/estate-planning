@@ -19,6 +19,7 @@
     <div class="header-actions">
       <button type="button" class="ghost" id="saveBtn">一時保存</button>
       <button type="button" class="ghost" id="loadBtn">保存読込</button>
+      <button type="button" class="ghost danger-action" id="clearSaveBtn">保存削除</button>
       <button type="button" class="ghost" id="exportBtn">JSON保存</button>
       <label class="ghost file-label">JSON読込<input type="file" id="importFile" accept="application/json" /></label>
       <button type="button" class="primary" onclick="window.print()">面談メモ印刷</button>
@@ -33,6 +34,7 @@
       <button class="tab" data-tab="gifts">贈与・保険</button>
       <button class="tab" data-tab="diagnosis">現状診断</button>
       <button class="tab" data-tab="actions">打ち手比較</button>
+      <button class="tab" data-tab="report">面談レポート</button>
       <button class="tab" data-tab="sources">根拠一覧</button>
     </nav>
 
@@ -79,6 +81,13 @@
             どの打ち手を検討するかを一緒に整理するための面談支援ツールです。実行判断・申告計算では、個別評価と税理士確認を行います。
           </p>
         </div>
+
+        <div class="notice privacy">
+          <strong>保存データの注意</strong>
+          <p>
+            一時保存はこのブラウザ内に相談者名・資産額を保存します。共有端末では使用後に「保存削除」を押し、必要に応じてJSONファイルも事務所ルールに沿って保管してください。
+          </p>
+        </div>
       </section>
 
       <section class="panel tab-panel" id="family">
@@ -102,6 +111,9 @@
           </label>
           <label>配偶者固有財産 概算
             <input data-field="spouseOwnAssets" data-money inputmode="numeric" placeholder="例：20,000,000" />
+          </label>
+          <label>二次相続までの生活費消費見込
+            <input data-field="spouseFutureConsumption" data-money inputmode="numeric" placeholder="例：15,000,000" />
           </label>
           <label>実子・代襲相続人の人数
             <input data-field="childrenCount" type="number" min="0" step="1" />
@@ -208,6 +220,21 @@
           <label>過去贈与の概算加算額
             <input data-field="priorGiftsAddBack" data-money inputmode="numeric" placeholder="例：3,000,000" />
           </label>
+          <label>生前贈与加算の反映方法
+            <select data-field="priorGiftMode">
+              <option value="auto">下の入力から自動目安</option>
+              <option value="manual">概算加算額を直接使用</option>
+            </select>
+          </label>
+          <label>相続開始の想定年
+            <input data-field="assumedInheritanceYear" type="number" min="2024" step="1" />
+          </label>
+          <label>開始前3年以内の暦年贈与
+            <input data-field="giftsWithin3Years" data-money inputmode="numeric" placeholder="例：3,000,000" />
+          </label>
+          <label>4〜7年内の贈与候補
+            <input data-field="giftsYears4to7" data-money inputmode="numeric" placeholder="例：4,000,000" />
+          </label>
           <label>年間贈与額 / 人
             <input data-field="annualGiftPerPerson" data-money inputmode="numeric" placeholder="例：1,100,000" />
           </label>
@@ -250,6 +277,8 @@
 
         <div class="result-cards" id="giftResults"></div>
 
+        <div class="notice warning" id="giftAddBackNotice"></div>
+
         <div class="staff-script">
           <h3>面談時の確認トーク</h3>
           <p>
@@ -270,6 +299,11 @@
 
         <div class="summary-band" id="riskBand"></div>
         <div class="result-cards" id="diagnosisResults"></div>
+
+        <div class="notice warning">
+          <strong>未反映・要個別確認</strong>
+          <div id="unreflectedItems"></div>
+        </div>
 
         <h3>配偶者取得割合別の概算比較</h3>
         <div class="table-wrap">
@@ -322,9 +356,26 @@
         <p class="muted-text">ここでの効果は概算です。特に生前贈与加算、小規模宅地等の特例、財産評価、相続時精算課税は、実行前に個別確認してください。</p>
         <div id="actionList" class="action-list"></div>
 
+        <div class="notice">
+          <strong>自動抽出された次回確認事項</strong>
+          <div id="taskSuggestions"></div>
+        </div>
+
         <label>次回までの確認資料・宿題
           <textarea data-field="nextTasks" rows="6" placeholder="固定資産税課税明細、保険証券、過去贈与一覧、家族の意向確認など"></textarea>
         </label>
+      </section>
+
+      <section class="panel tab-panel" id="report">
+        <div class="section-head">
+          <div>
+            <h2>面談レポート</h2>
+            <p>面談後に渡す要約です。印刷時はこの内容も出力されます。</p>
+          </div>
+          <button type="button" class="primary" onclick="window.print()">印刷</button>
+        </div>
+
+        <div id="reportView" class="report-view"></div>
       </section>
 
       <section class="panel tab-panel" id="sources">
@@ -348,6 +399,9 @@
         <li>実行前に税理士確認を前提とします。</li>
         <li>土地評価・小規模宅地・株価評価は個別確認です。</li>
       </ul>
+      <hr />
+      <h3>次に確認</h3>
+      <div id="sideTasks"></div>
     </aside>
   </main>
 
