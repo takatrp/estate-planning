@@ -54,6 +54,11 @@ const defaults = {
   actionSpouseHomeGiftAmount: 20000000,
   actionSettlementEnabled: false,
   actionSettlementAmount: 25000000,
+  actionRentalPropertyEnabled: false,
+  actionRentalPurchaseAmount: 30000000,
+  actionRentalLoanAmount: 0,
+  actionRentalValuationReductionAmount: 10000000,
+  actionRentalAnnualNetIncome: 0,
   actionStockReductionEnabled: false,
   actionStockReductionAmount: 0,
   actionCustomReductionEnabled: false,
@@ -65,7 +70,8 @@ const moneyFields = new Set([
   "debts", "funeralCosts", "cashReserveTarget", "lifeInsurance", "lifeInsuranceHeirs", "priorGiftsAddBack", "giftsWithin3Years", "giftsYears4to7",
   "annualGiftPerPerson", "settlementGift", "settlementDeductionUsed", "housingGift",
   "actionAnnualGiftPerPerson", "actionHousingGiftAmount", "actionLifeInsuranceAmount", "actionSpouseHomeGiftAmount",
-  "actionSettlementAmount", "actionStockReductionAmount", "actionCustomReductionAmount"
+  "actionSettlementAmount", "actionRentalPurchaseAmount", "actionRentalLoanAmount", "actionRentalValuationReductionAmount",
+  "actionRentalAnnualNetIncome", "actionStockReductionAmount", "actionCustomReductionAmount"
 ]);
 
 let state = normalizeState({ ...defaults });
@@ -76,7 +82,7 @@ function normalizeState(input) {
   ["childrenCount", "adoptedCount", "parentsCount", "siblingsCount", "annualGiftRecipients", "annualGiftYears", "actionAnnualGiftRecipients", "actionAnnualGiftYears", "assumedInheritanceYear"].forEach((field) => {
     out[field] = Math.max(0, Math.floor(toNumber(out[field])));
   });
-  ["actionAnnualGiftEnabled", "actionHousingGiftEnabled", "actionLifeInsuranceEnabled", "actionSpouseHomeGiftEnabled", "actionSettlementEnabled", "actionStockReductionEnabled", "actionCustomReductionEnabled"].forEach((field) => {
+  ["actionAnnualGiftEnabled", "actionHousingGiftEnabled", "actionLifeInsuranceEnabled", "actionSpouseHomeGiftEnabled", "actionSettlementEnabled", "actionRentalPropertyEnabled", "actionStockReductionEnabled", "actionCustomReductionEnabled"].forEach((field) => {
     out[field] = Boolean(out[field]);
   });
   return out;
@@ -423,6 +429,18 @@ function calcActionEffect() {
     notes.push(`相続時精算課税：移転額${yen(amount)}。相続税上は原則として相続財産に足し戻すため、ここでは相続税圧縮効果には入れず、将来値上がり分の固定化論点として表示します。`);
   }
 
+  if (state.actionRentalPropertyEnabled) {
+    const purchase = num(state.actionRentalPurchaseAmount);
+    const loan = Math.min(num(state.actionRentalLoanAmount), purchase);
+    const ownFunds = Math.max(0, purchase - loan);
+    const reduction = Math.min(num(state.actionRentalValuationReductionAmount), purchase);
+    const evaluatedValue = Math.max(0, purchase - reduction);
+    afterInput.cash = Math.max(0, num(afterInput.cash) - ownFunds);
+    afterInput.rentalProperty = num(afterInput.rentalProperty) + evaluatedValue;
+    afterInput.debts = num(afterInput.debts) + loan;
+    notes.push(`収益用不動産の取得：取得額${yen(purchase)}、借入${yen(loan)}、評価圧縮見込${yen(reduction)}を仮置き。概算上は貸付不動産評価と借入金を反映しますが、空室・修繕・金利上昇・換金性低下・分割困難リスクを個別確認してください。年間手残り見込は${yen(state.actionRentalAnnualNetIncome)}です。`);
+  }
+
   if (state.actionStockReductionEnabled) {
     const amount = Math.min(num(state.actionStockReductionAmount), num(afterInput.businessAssets));
     afterInput.businessAssets = Math.max(0, num(afterInput.businessAssets) - amount);
@@ -496,6 +514,7 @@ function getTaskSuggestions(input = state) {
   if (input.priorGiftMode === "auto" || num(input.priorGiftsAddBack)) tasks.push("過去贈与を贈与日・贈与者・受贈者・金額・申告有無で一覧化");
   if (r.cashRisk !== "低") tasks.push("納税資金として使える現預金、換金可能資産、保険金入金時期を確認");
   if (r.splitRisk !== "低") tasks.push("不動産・事業資産の分割方針、代償金、共有回避の希望を確認");
+  if (input.actionRentalPropertyEnabled) tasks.push("収益用不動産の取得は物件資料、賃貸条件、空室・修繕リスク、借入条件、承継後の管理者を確認");
   if (num(input.businessAssets) || input.actionStockReductionEnabled) tasks.push("会社株価対策は決算書、勘定科目内訳書、株主構成、役員退職金、含み益、役員借入金、配当方針を確認");
   if (r.secondRisk !== "低") tasks.push("配偶者固有財産、生活費消費見込、二次相続時の相続人を確認");
   if (e.taxableEstate > 0) tasks.push("固定資産税課税明細、路線価図、借入金残高、葬式費用見込を回収");
@@ -521,6 +540,10 @@ function getActionRecommendations(input = state) {
   }
   if (r.splitRisk !== "低") {
     add("actionCustomReductionEnabled", `不動産・事業資産など換金しにくい資産の比率が高く、分割困難リスクが${r.splitRisk}です。`, r.splitRisk === "高" ? 90 : 72);
+  }
+  if (e.taxableEstate > 0 && r.cashRisk === "低" && cashAfterReserve > Math.max(20000000, e.inheritanceTaxTotal * 1.5)) {
+    const caution = r.splitRisk === "高" ? "ただし分割困難リスクが高いため、共有回避と承継後の管理者を先に確認します。" : "換金性低下、空室・修繕、借入返済、承継後の管理者を合わせて確認します。";
+    add("actionRentalPropertyEnabled", `相続税リスクが${r.taxRisk}で、納税資金には余裕があります。現預金を収益用不動産へ組み替える余地があります。${caution}`, r.splitRisk === "高" ? 70 : 84);
   }
   if (e.taxableEstate > 0 && cashAfterReserve > Math.max(1100000, e.inheritanceTaxTotal * 0.5)) {
     add("actionAnnualGiftEnabled", "課税遺産総額があり、現預金から段階的に移転できる余地があります。加算対象期間に注意して検討します。", 82);
@@ -1018,6 +1041,19 @@ function actionDefinitions() {
       level: "中",
       body: "相続税を直接減らすというより、値上がり資産・収益資産の将来増加分を固定化する発想です。",
       fields: [["actionSettlementAmount", "移転予定額", "例：25,000,000"]]
+    },
+    {
+      enabled: "actionRentalPropertyEnabled",
+      title: "収益用不動産の取得を検討する",
+      source: "tool_disclaimer",
+      level: num(state.cash) - num(state.cashReserveTarget) > num(e.inheritanceTaxTotal) * 1.5 ? "中" : "低",
+      body: "現預金を収益用不動産に組み替え、相続税評価額の圧縮余地を確認する案です。換金性低下、空室・修繕、借入返済、分割困難リスクを必ず同時に確認します。",
+      fields: [
+        ["actionRentalPurchaseAmount", "取得予定額", "例：30,000,000"],
+        ["actionRentalLoanAmount", "借入予定額", "例：20,000,000"],
+        ["actionRentalValuationReductionAmount", "評価圧縮見込額", "例：10,000,000"],
+        ["actionRentalAnnualNetIncome", "年間手残り見込", "例：600,000"]
+      ]
     },
     {
       enabled: "actionStockReductionEnabled",
