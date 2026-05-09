@@ -100,6 +100,16 @@ const comma = (v) => {
 const pct = (v) => `${Math.round(v * 100)}%`;
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c]));
 const GIFT_TAX_URL = "https://takatrp.github.io/gift-tax/";
+const tabFlow = [
+  ["summary", "概要"],
+  ["family", "家族構成"],
+  ["assets", "資産構成"],
+  ["gifts", "贈与・保険"],
+  ["diagnosis", "現状診断"],
+  ["actions", "打ち手比較"],
+  ["report", "面談レポート"],
+  ["sources", "根拠一覧"]
+];
 
 function buildGiftTaxUrl(kind, overrides = {}) {
   const e = calcEstate(state);
@@ -508,6 +518,39 @@ function renderCards(id, cards) {
   cards.forEach((c) => el.appendChild(makeCard(c[0], c[1], c[2])));
 }
 
+function switchTab(tabId) {
+  const tab = document.querySelector(`.tab[data-tab="${tabId}"]`);
+  const panel = document.getElementById(tabId);
+  if (!tab || !panel) return;
+  document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+  document.querySelectorAll(".tab-panel").forEach((p) => p.classList.remove("active"));
+  tab.classList.add("active");
+  panel.classList.add("active");
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function renderStepNavigation() {
+  tabFlow.forEach(([id, label], index) => {
+    const panel = document.getElementById(id);
+    if (!panel) return;
+    let nav = panel.querySelector(":scope > .step-nav");
+    if (!nav) {
+      nav = document.createElement("div");
+      nav.className = "step-nav";
+      panel.appendChild(nav);
+    }
+    const prev = tabFlow[index - 1];
+    const next = tabFlow[index + 1];
+    nav.innerHTML = `
+      <div class="step-hint">現在：${esc(label)}${next ? ` / 次：${esc(next[1])}` : ""}</div>
+      <div class="step-nav-actions">
+        ${prev ? `<button type="button" class="ghost" data-step-target="${prev[0]}">戻る：${esc(prev[1])}</button>` : ""}
+        ${next ? `<button type="button" class="primary" data-step-target="${next[0]}">次へ：${esc(next[1])}</button>` : ""}
+      </div>
+    `;
+  });
+}
+
 function chartBlock(title, subtitle, rows, options = {}) {
   const valueFormatter = options.valueFormatter || yen;
   const visibleRows = rows.filter((row) => num(row.value) > 0 || row.keepZero);
@@ -705,6 +748,7 @@ function render() {
   renderSources();
   renderReport();
   renderSummary();
+  renderStepNavigation();
 }
 
 function renderAssetChart(e) {
@@ -1012,6 +1056,19 @@ function renderSources() {
   });
 }
 
+function getReportWarnings(input = state) {
+  const e = calcEstate(input);
+  const warnings = [];
+  if (!String(input.caseName || "").trim()) warnings.push("相談者名・案件名が未入力です。");
+  if (!String(input.meetingDate || "").trim()) warnings.push("面談日が未入力です。");
+  if (!String(input.staffName || "").trim()) warnings.push("担当者が未入力です。");
+  if (e.heirs.heirsForTax <= 0) warnings.push("法定相続人の人数を確認してください。");
+  const coreAssets = num(input.cash) + num(input.securities) + num(input.homeProperty) + num(input.rentalProperty) + num(input.businessAssets) + num(input.otherAssets);
+  if (coreAssets <= 0) warnings.push("主要資産が未入力です。資産構成タブを確認してください。");
+  if (input.priorGiftMode === "auto" && (num(input.giftsWithin3Years) || num(input.giftsYears4to7))) warnings.push("過去贈与は日付・贈与者・受贈者・申告有無を別途確認してください。");
+  return warnings;
+}
+
 function renderReport() {
   const wrap = document.getElementById("reportView");
   if (!wrap) return;
@@ -1021,8 +1078,20 @@ function renderReport() {
   const tasks = getTaskSuggestions(state);
   const unreflected = getUnreflectedItems(state);
   const selectedActions = actionDefinitions().filter((def) => state[def.enabled]).map((def) => def.title);
+  const reportWarnings = getReportWarnings(state);
   const riskText = `税:${r.taxRisk} / 資金:${r.cashRisk} / 分割:${r.splitRisk} / 二次:${r.secondRisk}`;
   wrap.innerHTML = `
+    ${reportWarnings.length ? `
+      <section class="report-block report-check warning">
+        <h3>印刷前の確認</h3>
+        <ul>${reportWarnings.map((item) => `<li>${esc(item)}</li>`).join("")}</ul>
+      </section>
+    ` : `
+      <section class="report-block report-check ok">
+        <h3>印刷前の確認</h3>
+        <p>基本項目は入力済みです。個別評価・資料確認は別途行ってください。</p>
+      </section>
+    `}
     <section class="report-block">
       <h3>${esc(state.caseName || "資産承継 面談メモ")}</h3>
       <p>${esc(state.meetingDate || "")}　担当：${esc(state.staffName || "")}</p>
@@ -1132,12 +1201,14 @@ document.addEventListener("change", (e) => {
 });
 
 document.addEventListener("click", (e) => {
+  const stepTarget = e.target.closest("[data-step-target]");
+  if (stepTarget) {
+    switchTab(stepTarget.dataset.stepTarget);
+    return;
+  }
   const tab = e.target.closest(".tab");
   if (tab) {
-    document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
-    document.querySelectorAll(".tab-panel").forEach((p) => p.classList.remove("active"));
-    tab.classList.add("active");
-    document.getElementById(tab.dataset.tab).classList.add("active");
+    switchTab(tab.dataset.tab);
   }
   const src = e.target.closest("[data-source]");
   if (src && !src.classList.contains("tab")) openSource(src.dataset.source);
@@ -1168,6 +1239,15 @@ document.getElementById("exportBtn").addEventListener("click", () => {
   a.download = `資産承継面談_${state.caseName || "案件"}_${new Date().toISOString().slice(0, 10)}.json`;
   a.click();
   URL.revokeObjectURL(a.href);
+});
+document.querySelectorAll(".print-action").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    collectStateFromInputs();
+    render();
+    const warnings = getReportWarnings(state);
+    if (warnings.length && !confirm(`印刷前の確認項目があります。\n\n${warnings.join("\n")}\n\nこのまま印刷しますか？`)) return;
+    window.print();
+  });
 });
 document.getElementById("importFile").addEventListener("change", async (e) => {
   const file = e.target.files?.[0];

@@ -21,7 +21,7 @@
       <button type="button" class="ghost danger-action" id="clearSaveBtn">保存削除</button>
       <button type="button" class="ghost" id="exportBtn">JSON保存</button>
       <label class="ghost file-label">JSON読込<input type="file" id="importFile" accept="application/json" /></label>
-      <button type="button" class="primary" onclick="window.print()">面談メモ印刷</button>
+      <button type="button" class="primary print-action">面談メモ印刷</button>
     </div>
   </header>
 
@@ -406,6 +406,14 @@
           <button class="source-btn" data-source="tool_disclaimer">根拠・注意</button>
         </div>
 
+        <h3>打ち手候補</h3>
+        <div class="notice action-guidance">
+          <strong>操作の流れ</strong>
+          <p>まず候補にチェックを入れ、必要な金額を入力してください。選択した内容をもとに、下のビフォー・アフターと比較表が更新されます。</p>
+        </div>
+        <p class="muted-text">ここでの効果は概算です。特に生前贈与加算、小規模宅地等の特例、財産評価、相続時精算課税は、実行前に個別確認してください。</p>
+        <div id="actionList" class="action-list"></div>
+
         <div class="before-after" id="beforeAfter"></div>
         <div class="chart-panel" id="actionEffectChart"></div>
         <div class="effect-table-wrap table-wrap">
@@ -421,10 +429,6 @@
             <tbody></tbody>
           </table>
         </div>
-
-        <h3>打ち手候補</h3>
-        <p class="muted-text">ここでの効果は概算です。特に生前贈与加算、小規模宅地等の特例、財産評価、相続時精算課税は、実行前に個別確認してください。</p>
-        <div id="actionList" class="action-list"></div>
 
         <div class="notice">
           <strong>自動抽出された次回確認事項</strong>
@@ -445,7 +449,7 @@
             <h2>面談レポート</h2>
             <p>面談後に渡す要約です。印刷時はこの内容も出力されます。</p>
           </div>
-          <button type="button" class="primary" onclick="window.print()">印刷</button>
+          <button type="button" class="primary print-action">印刷</button>
         </div>
 
         <div id="reportView" class="report-view"></div>
