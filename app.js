@@ -54,6 +54,8 @@ const defaults = {
   actionSpouseHomeGiftAmount: 20000000,
   actionSettlementEnabled: false,
   actionSettlementAmount: 25000000,
+  actionStockReductionEnabled: false,
+  actionStockReductionAmount: 0,
   actionCustomReductionEnabled: false,
   actionCustomReductionAmount: 0
 };
@@ -63,7 +65,7 @@ const moneyFields = new Set([
   "debts", "funeralCosts", "cashReserveTarget", "lifeInsurance", "lifeInsuranceHeirs", "priorGiftsAddBack", "giftsWithin3Years", "giftsYears4to7",
   "annualGiftPerPerson", "settlementGift", "settlementDeductionUsed", "housingGift",
   "actionAnnualGiftPerPerson", "actionHousingGiftAmount", "actionLifeInsuranceAmount", "actionSpouseHomeGiftAmount",
-  "actionSettlementAmount", "actionCustomReductionAmount"
+  "actionSettlementAmount", "actionStockReductionAmount", "actionCustomReductionAmount"
 ]);
 
 let state = normalizeState({ ...defaults });
@@ -74,7 +76,7 @@ function normalizeState(input) {
   ["childrenCount", "adoptedCount", "parentsCount", "siblingsCount", "annualGiftRecipients", "annualGiftYears", "actionAnnualGiftRecipients", "actionAnnualGiftYears", "assumedInheritanceYear"].forEach((field) => {
     out[field] = Math.max(0, Math.floor(toNumber(out[field])));
   });
-  ["actionAnnualGiftEnabled", "actionHousingGiftEnabled", "actionLifeInsuranceEnabled", "actionSpouseHomeGiftEnabled", "actionSettlementEnabled", "actionCustomReductionEnabled"].forEach((field) => {
+  ["actionAnnualGiftEnabled", "actionHousingGiftEnabled", "actionLifeInsuranceEnabled", "actionSpouseHomeGiftEnabled", "actionSettlementEnabled", "actionStockReductionEnabled", "actionCustomReductionEnabled"].forEach((field) => {
     out[field] = Boolean(out[field]);
   });
   return out;
@@ -411,6 +413,13 @@ function calcActionEffect() {
     notes.push(`相続時精算課税：移転額${yen(amount)}。相続税上は原則として相続財産に足し戻すため、ここでは相続税圧縮効果には入れず、将来値上がり分の固定化論点として表示します。`);
   }
 
+  if (state.actionStockReductionEnabled) {
+    const amount = Math.min(num(state.actionStockReductionAmount), num(afterInput.businessAssets));
+    afterInput.businessAssets = Math.max(0, num(afterInput.businessAssets) - amount);
+    transferAmount += amount;
+    notes.push(`会社株価対策：非上場株式・事業用資産の評価を${yen(amount)}圧縮する仮置きです。退職金、配当、類似業種比準要素、純資産、含み益、役員借入金、事業承継税制の可否を個別確認してください。`);
+  }
+
   if (state.actionCustomReductionEnabled) {
     const amount = num(state.actionCustomReductionAmount);
     const fields = ["otherAssets", "securities", "rentalProperty", "businessAssets", "homeProperty", "cash"];
@@ -477,6 +486,7 @@ function getTaskSuggestions(input = state) {
   if (input.priorGiftMode === "auto" || num(input.priorGiftsAddBack)) tasks.push("過去贈与を贈与日・贈与者・受贈者・金額・申告有無で一覧化");
   if (r.cashRisk !== "低") tasks.push("納税資金として使える現預金、換金可能資産、保険金入金時期を確認");
   if (r.splitRisk !== "低") tasks.push("不動産・事業資産の分割方針、代償金、共有回避の希望を確認");
+  if (num(input.businessAssets) || input.actionStockReductionEnabled) tasks.push("会社株価対策は決算書、勘定科目内訳書、株主構成、役員退職金、含み益、役員借入金、配当方針を確認");
   if (r.secondRisk !== "低") tasks.push("配偶者固有財産、生活費消費見込、二次相続時の相続人を確認");
   if (e.taxableEstate > 0) tasks.push("固定資産税課税明細、路線価図、借入金残高、葬式費用見込を回収");
   return [...new Set(tasks)];
@@ -926,11 +936,19 @@ function actionDefinitions() {
       fields: [["actionSettlementAmount", "移転予定額", "例：25,000,000"]]
     },
     {
+      enabled: "actionStockReductionEnabled",
+      title: "会社株価対策を検討する",
+      source: "tool_disclaimer",
+      level: num(state.businessAssets) > 0 ? "高" : "低",
+      body: "非上場株式・事業用資産がある場合の論点です。退職金、配当、利益圧縮、純資産、含み益、役員借入金、株主構成、事業承継税制を分けて確認します。",
+      fields: [["actionStockReductionAmount", "株価・事業資産の評価圧縮見込", "例：10,000,000"]]
+    },
+    {
       enabled: "actionCustomReductionEnabled",
       title: "その他の評価圧縮・資産移転効果を仮置きする",
       source: "tool_disclaimer",
       level: e.illiquidRatio >= 0.45 ? "高" : "低",
-      body: "不動産評価、事業承継、資産組替えなどの個別検討効果を仮置きする欄です。根拠確認なしで提案確定しないでください。",
+      body: "不動産評価、資産組替えなどの個別検討効果を仮置きする欄です。根拠確認なしで提案確定しないでください。",
       fields: [["actionCustomReductionAmount", "概算効果額", "例：10,000,000"]]
     }
   ];
