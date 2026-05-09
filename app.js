@@ -502,6 +502,45 @@ function getTaskSuggestions(input = state) {
   return [...new Set(tasks)];
 }
 
+function getActionRecommendations(input = state) {
+  const e = calcEstate(input);
+  const r = diagnoseRisks(input);
+  const recommendations = [];
+  const add = (enabled, reason, priority) => {
+    if (!recommendations.some((item) => item.enabled === enabled)) recommendations.push({ enabled, reason, priority });
+  };
+  const remainingInsuranceRoom = Math.max(0, 5000000 * e.heirs.heirsForTax - num(input.lifeInsuranceHeirs));
+  const cashAfterReserve = num(input.cash) - num(input.cashReserveTarget);
+  const hasFutureGrowthAssets = num(input.securities) + num(input.rentalProperty) + num(input.businessAssets) > 0;
+
+  if (r.cashRisk !== "低" || remainingInsuranceRoom > 0) {
+    add("actionLifeInsuranceEnabled", `納税資金リスクが${r.cashRisk}、死亡保険金非課税枠の残り目安が ${yen(remainingInsuranceRoom)} あります。`, r.cashRisk === "高" ? 95 : 78);
+  }
+  if (num(input.businessAssets) > 0) {
+    add("actionStockReductionEnabled", "非上場株式・事業用資産があるため、株価評価、退職金、配当、純資産、含み益、役員借入金を分けて確認します。", 94);
+  }
+  if (r.splitRisk !== "低") {
+    add("actionCustomReductionEnabled", `不動産・事業資産など換金しにくい資産の比率が高く、分割困難リスクが${r.splitRisk}です。`, r.splitRisk === "高" ? 90 : 72);
+  }
+  if (e.taxableEstate > 0 && cashAfterReserve > Math.max(1100000, e.inheritanceTaxTotal * 0.5)) {
+    add("actionAnnualGiftEnabled", "課税遺産総額があり、現預金から段階的に移転できる余地があります。加算対象期間に注意して検討します。", 82);
+  }
+  if (input.homePlanChild === "yes") {
+    add("actionHousingGiftEnabled", "住宅取得予定の子・孫がいるため、住宅区分、期限、所得要件を確認したうえで候補になります。", 80);
+  }
+  if (input.hasSpouse === "yes" && num(input.homeProperty) > 0 && r.secondRisk !== "中") {
+    add("actionSpouseHomeGiftEnabled", "配偶者の生活基盤を守る観点で検討できます。二次相続と配偶者固有財産の増加も同時に確認します。", 68);
+  }
+  if (hasFutureGrowthAssets && e.taxableEstate > 0) {
+    add("actionSettlementEnabled", "値上がり資産・収益資産があるため、将来増加分の固定化という観点で確認します。", 64);
+  }
+  if (!recommendations.length) {
+    add("actionAnnualGiftEnabled", "現時点では強いリスクが出ていないため、まずは少額の暦年贈与と資料確認から検討します。", 40);
+  }
+
+  return recommendations.sort((a, b) => b.priority - a.priority).slice(0, 3);
+}
+
 function makeCard(label, value, note = "") {
   const tpl = document.getElementById("cardTemplate");
   const node = tpl.content.firstElementChild.cloneNode(true);
@@ -743,6 +782,7 @@ function render() {
   renderUnreflectedItems();
   renderSpouseScenarios();
   renderActionComparison();
+  renderActionRecommendations();
   if (!document.activeElement || !document.activeElement.closest("#actionList") || document.activeElement.type === "checkbox") renderActionCards();
   renderTaskSuggestions();
   renderSources();
@@ -1028,6 +1068,36 @@ function renderActionCards() {
   });
 }
 
+function renderActionRecommendations() {
+  const wrap = document.getElementById("actionRecommendations");
+  if (!wrap) return;
+  const defs = actionDefinitions();
+  const recommendations = getActionRecommendations(state)
+    .map((item) => ({ ...item, def: defs.find((def) => def.enabled === item.enabled) }))
+    .filter((item) => item.def);
+  wrap.innerHTML = `
+    <div class="recommendation-head">
+      <div>
+        <h3>おすすめの打ち手</h3>
+        <p>現在の入力内容から、優先的に確認したい候補を自動抽出します。実行判断では個別要件を確認してください。</p>
+      </div>
+      <span>${recommendations.length}件</span>
+    </div>
+    <div class="recommendation-list">
+      ${recommendations.map((item, index) => `
+        <article class="recommendation-item ${state[item.enabled] ? "selected" : ""}">
+          <div class="recommendation-title">
+            <b>${index + 1}. ${esc(item.def.title)}</b>
+            <span class="tag ${riskClass(item.def.level)}">${esc(item.def.level)}</span>
+          </div>
+          <p>${esc(item.reason)}</p>
+          <button type="button" class="ghost" data-recommend-action="${esc(item.enabled)}">${state[item.enabled] ? "選択済み" : "この打ち手を選択"}</button>
+        </article>
+      `).join("")}
+    </div>
+  `;
+}
+
 function renderSources() {
   const usageCount = {};
   Object.values(TaxRules.sources).forEach((s) => {
@@ -1204,6 +1274,12 @@ document.addEventListener("click", (e) => {
   const stepTarget = e.target.closest("[data-step-target]");
   if (stepTarget) {
     switchTab(stepTarget.dataset.stepTarget);
+    return;
+  }
+  const recommendedAction = e.target.closest("[data-recommend-action]");
+  if (recommendedAction) {
+    state[recommendedAction.dataset.recommendAction] = true;
+    render();
     return;
   }
   const tab = e.target.closest(".tab");
