@@ -97,6 +97,55 @@ const comma = (v) => {
 };
 const pct = (v) => `${Math.round(v * 100)}%`;
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c]));
+const GIFT_TAX_URL = "https://takatrp.github.io/gift-tax/";
+
+function buildGiftTaxUrl(kind, overrides = {}) {
+  const e = calcEstate(state);
+  const params = new URLSearchParams({
+    source: "estate-planning",
+    caseName: state.caseName || "",
+    estateTotal: Math.floor(e.netEstate),
+    heirs: e.heirs.heirsForTax,
+    spouse: state.hasSpouse === "yes" ? "1" : "0"
+  });
+
+  if (kind === "annual") {
+    const amount = overrides.amount ?? state.annualGiftPerPerson;
+    const annualMode = state.giftRateType === "general" ? "general" : "special";
+    params.set("tabMode", "single");
+    params.set("mode", "annual");
+    params.set("annualMode", annualMode);
+    params.set(annualMode === "general" ? "annualGeneralAmount" : "annualSpecialAmount", Math.floor(num(amount)));
+  }
+
+  if (kind === "settlement") {
+    const amount = overrides.amount ?? state.settlementGift;
+    params.set("tabMode", "single");
+    params.set("mode", "seisan");
+    params.set("seisanAmount", Math.floor(num(amount)));
+    params.set("seisanUsedSpecial", Math.floor(num(state.settlementDeductionUsed)));
+  }
+
+  if (kind === "long") {
+    params.set("tabMode", "multi");
+    params.set("multiEstateTotal", Math.floor(e.netEstate));
+    params.set("multiYears", Math.max(1, Math.floor(num(overrides.years ?? state.annualGiftYears) || 1)));
+    params.set("multiReturnRate", "0");
+    params.set("multiRecipients", Math.max(1, Math.floor(num(overrides.recipients ?? state.annualGiftRecipients) || 1)));
+    params.set("multiHeirs", Math.max(1, e.heirs.heirsForTax || 1));
+    params.set("multiSpouse", state.hasSpouse === "yes" ? "1" : "0");
+    params.set("multiAnnualGiftPerPerson", Math.floor(num(overrides.annualGift ?? state.annualGiftPerPerson)));
+    params.set("multiSeisanInitialGift", Math.floor(num(overrides.settlementGift ?? state.settlementGift)));
+    params.set("multiSeisanAnnualGift", Math.floor(num(overrides.settlementAnnualGift ?? 1100000)));
+    params.set("multiSeisanUsedSpecialBefore", Math.floor(num(state.settlementDeductionUsed)));
+  }
+
+  return `${GIFT_TAX_URL}?${params.toString()}`;
+}
+
+function giftTaxLink(kind, label, overrides = {}) {
+  return `<a class="tool-link" href="${buildGiftTaxUrl(kind, overrides)}" target="_blank" rel="noopener">${label}</a>`;
+}
 
 function applyRate(amount, rates) {
   const taxable = Math.max(0, Math.floor(amount));
@@ -505,6 +554,7 @@ function render() {
     ["生前贈与加算額", yen(e.priorGiftAddBack), "相続税の課税価格に加算する概算"]
   ]);
 
+  renderGiftTaxLinks(g);
   renderGiftAddBackNotice(g);
   renderRiskBand(risks);
   renderUnreflectedItems();
@@ -515,6 +565,31 @@ function render() {
   renderSources();
   renderReport();
   renderSummary();
+}
+
+function renderGiftTaxLinks(g) {
+  const el = document.getElementById("giftTaxLinks");
+  if (!el) return;
+  const e = calcEstate(state);
+  el.innerHTML = `
+    <div>
+      <h3>贈与税ツールで詳細試算</h3>
+      <p>ここでは面談用の概算に留め、贈与税そのものの単年試算・長期比較は専用ツールへ渡して確認します。</p>
+    </div>
+    <div class="tool-link-actions">
+      ${giftTaxLink("annual", "暦年贈与を単年試算", { amount: state.annualGiftPerPerson })}
+      ${giftTaxLink("settlement", "相続時精算課税を単年試算", { amount: state.settlementGift })}
+      ${giftTaxLink("long", "暦年 vs 精算課税を長期比較", {
+        annualGift: state.annualGiftPerPerson,
+        settlementGift: state.settlementGift,
+        recipients: state.annualGiftRecipients,
+        years: state.annualGiftYears
+      })}
+    </div>
+    <p class="tool-link-note">
+      送出値：正味財産 ${yen(e.netEstate)}、法定相続人 ${e.heirs.heirsForTax}人、暦年贈与 ${yen(g.totalAnnualGift)}、精算課税予定 ${yen(state.settlementGift)}
+    </p>
+  `;
 }
 
 function renderGiftAddBackNotice(g) {
@@ -628,6 +703,7 @@ function actionDefinitions() {
       enabled: "actionAnnualGiftEnabled",
       title: "暦年贈与で少しずつ移す",
       source: "annual_gift",
+      giftTax: "annual",
       level: "中",
       body: "加算対象期間に注意しつつ、現預金などを子・孫へ段階的に移す案です。",
       fields: [
@@ -664,6 +740,7 @@ function actionDefinitions() {
       enabled: "actionSettlementEnabled",
       title: "相続時精算課税で将来値上がり分を固定する",
       source: "settlement_tax",
+      giftTax: "settlement",
       level: "中",
       body: "相続税を直接減らすというより、値上がり資産・収益資産の将来増加分を固定化する発想です。",
       fields: [["actionSettlementAmount", "移転予定額", "例：25,000,000"]]
@@ -698,7 +775,12 @@ function renderActionCards() {
             <input ${type === "number" ? `type="number" min="0" step="1"` : `data-money inputmode="numeric"`} data-action-field="${key}" placeholder="${ph}" value="${type === "number" ? (state[key] ?? "") : comma(state[key])}">
           </label>`).join("")}
       </div>
-      <button type="button" class="source-btn" data-source="${def.source}">根拠を見る</button>
+      <div class="action-links">
+        <button type="button" class="source-btn" data-source="${def.source}">根拠を見る</button>
+        ${def.giftTax ? giftTaxLink(def.giftTax, "贈与税ツールで試算", def.giftTax === "annual"
+          ? { amount: state.actionAnnualGiftPerPerson }
+          : { amount: state.actionSettlementAmount }) : ""}
+      </div>
     `;
     wrap.appendChild(div);
   });
