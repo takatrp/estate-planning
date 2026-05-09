@@ -557,10 +557,66 @@ function comparisonChartBlock(title, subtitle, rows) {
   `;
 }
 
+function pieChartBlock(title, subtitle, rows, options = {}) {
+  const valueFormatter = options.valueFormatter || yen;
+  const colors = options.colors || ["#578899", "#6b8f71", "#b7791f", "#7c6f99", "#9a6b5b", "#4f7c8c", "#8a7f5a"];
+  const visibleRows = rows.filter((row) => num(row.value) > 0);
+  const total = visibleRows.reduce((sum, row) => sum + num(row.value), 0);
+  if (!visibleRows.length || total <= 0) {
+    return `
+      <div class="chart-head">
+        <h3>${esc(title)}</h3>
+        ${subtitle ? `<p>${esc(subtitle)}</p>` : ""}
+      </div>
+      <p class="muted-text">表示できる構成データがまだありません。</p>
+    `;
+  }
+
+  let cursor = 0;
+  const stops = visibleRows.map((row, i) => {
+    const start = cursor;
+    cursor += (num(row.value) / total) * 100;
+    return `${colors[i % colors.length]} ${start.toFixed(2)}% ${cursor.toFixed(2)}%`;
+  }).join(", ");
+
+  const legend = visibleRows.map((row, i) => {
+    const value = num(row.value);
+    const ratio = total ? value / total : 0;
+    return `
+      <div class="pie-legend-row">
+        <span class="pie-dot" style="background:${colors[i % colors.length]}"></span>
+        <span>${esc(row.label)}</span>
+        <b>${esc(valueFormatter(value))}</b>
+        <em>${pct(ratio)}</em>
+      </div>
+    `;
+  }).join("");
+
+  return `
+    <div class="chart-head">
+      <h3>${esc(title)}</h3>
+      ${subtitle ? `<p>${esc(subtitle)}</p>` : ""}
+    </div>
+    <div class="pie-layout">
+      <div class="donut" style="background:conic-gradient(${stops})">
+        <div><strong>${esc(valueFormatter(total))}</strong><span>${esc(options.centerLabel || "合計")}</span></div>
+      </div>
+      <div class="pie-legend">${legend}</div>
+    </div>
+    ${options.note ? `<p class="chart-note">${esc(options.note)}</p>` : ""}
+  `;
+}
+
 function renderChart(id, title, subtitle, rows, options = {}) {
   const el = document.getElementById(id);
   if (!el) return;
   el.innerHTML = chartBlock(title, subtitle, rows, options);
+}
+
+function renderPieChart(id, title, subtitle, rows, options = {}) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.innerHTML = pieChartBlock(title, subtitle, rows, options);
 }
 
 function renderComparisonChart(id, title, subtitle, rows) {
@@ -642,15 +698,17 @@ function render() {
 }
 
 function renderAssetChart(e) {
-  renderChart("assetChart", "資産構成の見える化", "換金しやすい資産と、評価・分割確認が必要な資産を分けて確認します。", [
+  renderPieChart("assetChart", "資産構成の見える化", "財産全体に占める構成比を確認します。換金性・分割困難性の会話に使います。", [
     { label: "現預金", value: state.cash },
     { label: "上場株式・投信等", value: state.securities },
     { label: "自宅土地建物", value: state.homeProperty },
     { label: "貸付不動産", value: state.rentalProperty },
     { label: "非上場株式・事業用資産", value: state.businessAssets },
-    { label: "その他財産", value: state.otherAssets },
-    { label: "債務・葬式費用", value: e.deductions, note: "控除側の金額" }
-  ]);
+    { label: "その他財産", value: state.otherAssets }
+  ], {
+    centerLabel: "総財産",
+    note: `債務・葬式費用 ${yen(e.deductions)} は構成比から除き、正味財産の計算で控除しています。`
+  });
 }
 
 function renderGiftChart(g, e) {
@@ -915,7 +973,7 @@ function renderSources() {
       usageCount[usage] = (usageCount[usage] || 0) + 1;
     });
   });
-  renderChart("sourceChart", "根拠マスタの用途分布", "どの画面・論点に根拠が紐づいているかを確認します。", Object.entries(usageCount)
+  renderPieChart("sourceChart", "根拠マスタの用途分布", "どの画面・論点に根拠が紐づいているかを件数構成で確認します。", Object.entries(usageCount)
     .sort((a, b) => b[1] - a[1])
     .map(([label, value]) => ({ label, value, display: `${value}件` })), { valueFormatter: (v) => `${v}件` });
 
