@@ -498,6 +498,77 @@ function renderCards(id, cards) {
   cards.forEach((c) => el.appendChild(makeCard(c[0], c[1], c[2])));
 }
 
+function chartBlock(title, subtitle, rows, options = {}) {
+  const valueFormatter = options.valueFormatter || yen;
+  const visibleRows = rows.filter((row) => num(row.value) > 0 || row.keepZero);
+  const max = options.max ?? Math.max(0, ...visibleRows.map((row) => num(row.value)));
+  const body = visibleRows.length && max > 0
+    ? visibleRows.map((row, i) => {
+        const value = Math.max(0, num(row.value));
+        const width = Math.max(value > 0 ? 3 : 0, Math.min(100, (value / max) * 100));
+        return `
+          <div class="chart-row">
+            <div class="chart-row-head">
+              <span>${esc(row.label)}</span>
+              <b>${esc(row.display ?? valueFormatter(value))}</b>
+            </div>
+            <div class="chart-track"><span class="chart-fill tone-${(i % 5) + 1}" style="width:${width}%"></span></div>
+            ${row.note ? `<small>${esc(row.note)}</small>` : ""}
+          </div>
+        `;
+      }).join("")
+    : `<p class="muted-text">表示できる金額がまだありません。</p>`;
+  return `
+    <div class="chart-head">
+      <h3>${esc(title)}</h3>
+      ${subtitle ? `<p>${esc(subtitle)}</p>` : ""}
+    </div>
+    <div class="chart-body">${body}</div>
+  `;
+}
+
+function comparisonChartBlock(title, subtitle, rows) {
+  const max = Math.max(0, ...rows.flatMap((row) => [num(row.before), num(row.after)]));
+  const body = max > 0
+    ? rows.map((row) => {
+        const before = Math.max(0, num(row.before));
+        const after = Math.max(0, num(row.after));
+        return `
+          <div class="compare-row">
+            <div class="chart-row-head"><span>${esc(row.label)}</span><b>${esc(row.note || "")}</b></div>
+            <div class="compare-bars">
+              <span class="compare-label">現状</span>
+              <div class="chart-track"><span class="chart-fill compare-before" style="width:${Math.max(before > 0 ? 3 : 0, (before / max) * 100)}%"></span></div>
+              <b>${yen(before)}</b>
+              <span class="compare-label">対策後</span>
+              <div class="chart-track"><span class="chart-fill compare-after" style="width:${Math.max(after > 0 ? 3 : 0, (after / max) * 100)}%"></span></div>
+              <b>${yen(after)}</b>
+            </div>
+          </div>
+        `;
+      }).join("")
+    : `<p class="muted-text">比較できる金額がまだありません。</p>`;
+  return `
+    <div class="chart-head">
+      <h3>${esc(title)}</h3>
+      ${subtitle ? `<p>${esc(subtitle)}</p>` : ""}
+    </div>
+    <div class="chart-body">${body}</div>
+  `;
+}
+
+function renderChart(id, title, subtitle, rows, options = {}) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.innerHTML = chartBlock(title, subtitle, rows, options);
+}
+
+function renderComparisonChart(id, title, subtitle, rows) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.innerHTML = comparisonChartBlock(title, subtitle, rows);
+}
+
 function renderInputValues() {
   document.querySelectorAll("[data-field]").forEach((el) => {
     if (document.activeElement === el) return;
@@ -554,6 +625,9 @@ function render() {
     ["生前贈与加算額", yen(e.priorGiftAddBack), "相続税の課税価格に加算する概算"]
   ]);
 
+  renderAssetChart(e);
+  renderGiftChart(g, e);
+  renderDiagnosisCharts(e, risks);
   renderGiftTaxLinks(g);
   renderGiftAddBackNotice(g);
   renderRiskBand(risks);
@@ -565,6 +639,48 @@ function render() {
   renderSources();
   renderReport();
   renderSummary();
+}
+
+function renderAssetChart(e) {
+  renderChart("assetChart", "資産構成の見える化", "換金しやすい資産と、評価・分割確認が必要な資産を分けて確認します。", [
+    { label: "現預金", value: state.cash },
+    { label: "上場株式・投信等", value: state.securities },
+    { label: "自宅土地建物", value: state.homeProperty },
+    { label: "貸付不動産", value: state.rentalProperty },
+    { label: "非上場株式・事業用資産", value: state.businessAssets },
+    { label: "その他財産", value: state.otherAssets },
+    { label: "債務・葬式費用", value: e.deductions, note: "控除側の金額" }
+  ]);
+}
+
+function renderGiftChart(g, e) {
+  renderChart("giftChart", "贈与・保険の論点比較", "移転額、贈与税コスト、相続財産への加算額、保険非課税枠を同じ尺度で確認します。", [
+    { label: "暦年贈与 移転総額", value: g.totalAnnualGift },
+    { label: "暦年贈与税 合計概算", value: g.totalAnnualGiftTax },
+    { label: "相続財産へ加算する贈与額", value: e.priorGiftAddBack },
+    { label: "相続時精算課税 贈与予定額", value: state.settlementGift },
+    { label: "相続時精算課税 贈与税概算", value: g.settlementTax },
+    { label: "死亡保険金非課税枠", value: e.insuranceExemption },
+    { label: "住宅資金贈与 非課税枠", value: g.housingLimit }
+  ]);
+}
+
+function renderDiagnosisCharts(e, risks) {
+  const riskScore = { "低": 1, "中": 2, "高": 3 };
+  renderChart("riskChart", "リスク強度", "税額、納税資金、分割困難、二次相続の優先度を並べます。", [
+    { label: "相続税", value: riskScore[risks.taxRisk], display: risks.taxRisk, keepZero: true },
+    { label: "納税資金", value: riskScore[risks.cashRisk], display: risks.cashRisk, keepZero: true },
+    { label: "分割困難", value: riskScore[risks.splitRisk], display: risks.splitRisk, keepZero: true },
+    { label: "二次相続", value: riskScore[risks.secondRisk], display: risks.secondRisk, keepZero: true }
+  ], { max: 3, valueFormatter: (v) => v });
+
+  const spouseRows = state.hasSpouse === "yes"
+    ? [0, 0.25, 0.5, 0.75, 1].map((r) => {
+        const s = calcSpouseScenario(r);
+        return { label: `配偶者 ${pct(r)}取得`, value: s.totalTax, note: `一次 ${yen(s.firstTax)} / 二次 ${yen(s.secondTax)}` };
+      })
+    : [{ label: "配偶者取得割合比較", value: 0, note: "配偶者なしのため対象外" }];
+  renderChart("spouseScenarioChart", "一次・二次相続の合計", "配偶者取得割合ごとの合計税額を横並びで比較します。", spouseRows);
 }
 
 function renderGiftTaxLinks(g) {
@@ -664,6 +780,12 @@ function renderActionComparison() {
   const effect = calcActionEffect();
   const beforeCashShortage = Math.max(0, effect.before.inheritanceTaxTotal - (num(state.cash) - num(state.cashReserveTarget)));
   const afterCashShortage = Math.max(0, effect.after.inheritanceTaxTotal - (num(effect.afterInput.cash) - num(effect.afterInput.cashReserveTarget)));
+  renderComparisonChart("actionEffectChart", "打ち手によるビフォー・アフター", "正味財産、課税遺産、相続税、納税資金不足の変化を棒で確認します。", [
+    { label: "正味財産", before: effect.before.netEstate, after: effect.after.netEstate },
+    { label: "課税遺産総額", before: effect.before.taxableEstate, after: effect.after.taxableEstate },
+    { label: "相続税総額概算", before: effect.before.inheritanceTaxTotal, after: effect.after.inheritanceTaxTotal },
+    { label: "納税資金不足目安", before: beforeCashShortage, after: afterCashShortage }
+  ]);
   const beforeAfter = document.getElementById("beforeAfter");
   if (beforeAfter) {
     beforeAfter.innerHTML = `
@@ -787,6 +909,16 @@ function renderActionCards() {
 }
 
 function renderSources() {
+  const usageCount = {};
+  Object.values(TaxRules.sources).forEach((s) => {
+    (s.usage || ["その他"]).forEach((usage) => {
+      usageCount[usage] = (usageCount[usage] || 0) + 1;
+    });
+  });
+  renderChart("sourceChart", "根拠マスタの用途分布", "どの画面・論点に根拠が紐づいているかを確認します。", Object.entries(usageCount)
+    .sort((a, b) => b[1] - a[1])
+    .map(([label, value]) => ({ label, value, display: `${value}件` })), { valueFormatter: (v) => `${v}件` });
+
   const wrap = document.getElementById("sourceList");
   if (!wrap) return;
   wrap.innerHTML = "";
@@ -824,6 +956,13 @@ function renderReport() {
         <div><span>相続税総額概算</span><b>${yen(e.inheritanceTaxTotal)}</b></div>
         <div><span>打ち手後概算</span><b>${yen(effect.after.inheritanceTaxTotal)}</b></div>
       </div>
+    </section>
+    <section class="report-block">
+      ${comparisonChartBlock("主要金額の比較", "面談レポート用に、現状と打ち手後の差を要約します。", [
+        { label: "正味財産", before: effect.before.netEstate, after: effect.after.netEstate },
+        { label: "課税遺産総額", before: effect.before.taxableEstate, after: effect.after.taxableEstate },
+        { label: "相続税総額概算", before: effect.before.inheritanceTaxTotal, after: effect.after.inheritanceTaxTotal }
+      ])}
     </section>
     <section class="report-block">
       <h3>主な見立て</h3>
