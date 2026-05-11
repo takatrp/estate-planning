@@ -106,7 +106,8 @@ const comma = (v) => {
 const pct = (v) => `${Math.round(v * 100)}%`;
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c]));
 const GIFT_TAX_URL = "https://takatrp.github.io/gift-tax/";
-const VERSION = "Rev.17";
+const VERSION = "Rev.18";
+const CHART_COLORS = ["#578899", "#6b8f71", "#b7791f", "#7c6f99", "#9a6b5b", "#4f7c8c", "#8a7f5a"];
 const tabFlow = [
   ["summary", "概要"],
   ["family", "家族構成"],
@@ -117,6 +118,11 @@ const tabFlow = [
   ["report", "面談レポート"],
   ["sources", "根拠一覧"]
 ];
+
+function calcValueHtml(value, key) {
+  const text = esc(value);
+  return key ? `<button type="button" class="calc-link" data-breakdown="${esc(key)}" title="計算過程を表示">${text}</button>` : text;
+}
 
 function buildGiftTaxUrl(kind, overrides = {}) {
   const e = calcEstate(state);
@@ -361,6 +367,165 @@ export function calcGift(input = state) {
   return { annualTaxable, annualGiftTaxPerPerson, totalAnnualGift, totalAnnualGiftTax, settlementBase, remainingSpecial, settlementTaxable, settlementTax, housingLimit, housingTaxable, housingGiftTax, giftAddBack: calcGiftAddBack(input) };
 }
 
+function rateLabel(amount, rates) {
+  const taxable = Math.max(0, Math.floor(num(amount)));
+  const row = rates.find((r) => taxable <= r.max) || rates[rates.length - 1];
+  const maxLabel = Number.isFinite(row.max) ? `${yen(row.max)}以下` : "超過階層";
+  return `${maxLabel}：税率${Math.round(row.rate * 100)}%・控除${yen(row.deduction)}`;
+}
+
+function inheritanceTaxBreakdownLines(e) {
+  if (!e.taxableEstate || e.heirs.heirsForTax <= 0) return ["課税遺産総額が0円のため、相続税総額は0円"];
+  const lines = [`課税遺産総額 ${yen(e.taxableEstate)} を法定相続分で按分`];
+  e.heirs.shares.forEach((s) => {
+    if (s.share <= 0) return;
+    const shareAmount = e.taxableEstate * s.share;
+    if (s.label.includes("子等")) {
+      const count = Math.max(1, e.heirs.childHeirsForTax);
+      const each = shareAmount / count;
+      lines.push(`${s.label}：${yen(e.taxableEstate)} × ${pct(s.share)} ÷ ${count}人 = ${yen(each)} / 人、${rateLabel(each, TaxRules.inheritanceTaxRates)}`);
+    } else if (s.label.includes("直系尊属")) {
+      const count = Math.max(1, e.heirs.parents);
+      const each = shareAmount / count;
+      lines.push(`${s.label}：${yen(e.taxableEstate)} × ${pct(s.share)} ÷ ${count}人 = ${yen(each)} / 人、${rateLabel(each, TaxRules.inheritanceTaxRates)}`);
+    } else if (s.label.includes("兄弟姉妹")) {
+      const count = Math.max(1, e.heirs.siblings);
+      const each = shareAmount / count;
+      lines.push(`${s.label}：${yen(e.taxableEstate)} × ${pct(s.share)} ÷ ${count}人 = ${yen(each)} / 人、${rateLabel(each, TaxRules.inheritanceTaxRates)}`);
+    } else {
+      lines.push(`${s.label}：${yen(e.taxableEstate)} × ${pct(s.share)} = ${yen(shareAmount)}、${rateLabel(shareAmount, TaxRules.inheritanceTaxRates)}`);
+    }
+  });
+  lines.push(`上記の各人別税額を合計 = ${yen(e.inheritanceTaxTotal)}`);
+  return lines;
+}
+
+function getCalculationBreakdowns(input = state) {
+  const e = calcEstate(input);
+  const g = calcGift(input);
+  const giftRateRows = TaxRules.giftTaxRates[input.giftRateType] || TaxRules.giftTaxRates.special;
+  const annualTaxable = Math.max(0, num(input.annualGiftPerPerson) - 1100000);
+  const cashShortage = Math.max(0, e.inheritanceTaxTotal - (num(input.cash) - num(input.cashReserveTarget)));
+  return {
+    heirsForTax: {
+      title: "法定相続人の数（税額計算用）",
+      note: "養子は、実子がいる場合1人まで、実子がいない場合2人までを税額計算上の法定相続人に算入します。",
+      lines: [
+        `配偶者：${e.heirs.spouse}人`,
+        `実子：${e.heirs.naturalChildren}人`,
+        `養子入力：${e.heirs.adopted}人、税額計算上の養子算入：${e.heirs.adoptedForTax}人`,
+        `子等の人数：${e.heirs.naturalChildren} + ${e.heirs.adoptedForTax} = ${e.heirs.childHeirsForTax}人`,
+        `法定相続人の数：${e.heirs.heirsForTax}人（相続順位：${e.heirs.rank}）`
+      ]
+    },
+    basicDeduction: {
+      title: "相続税の基礎控除",
+      lines: [
+        `3,000万円 + 600万円 × 法定相続人 ${e.heirs.heirsForTax}人`,
+        `${yen(30000000)} + ${yen(6000000 * e.heirs.heirsForTax)} = ${yen(e.heirs.basicDeduction)}`
+      ]
+    },
+    grossAssets: {
+      title: "課税対象財産 概算",
+      lines: [
+        `現預金 ${yen(input.cash)} + 上場株式・投信等 ${yen(input.securities)} + 自宅土地建物 ${yen(input.homeProperty)}`,
+        `貸付不動産 ${yen(input.rentalProperty)} + 非上場株式・事業用資産 ${yen(input.businessAssets)} + その他財産 ${yen(input.otherAssets)}`,
+        `課税対象保険金 ${yen(e.taxableInsurance)} + 生前贈与加算 ${yen(e.priorGiftAddBack)}`,
+        `合計 = ${yen(e.grossAssets)}`
+      ]
+    },
+    deductions: {
+      title: "債務・葬式費用",
+      lines: [`債務 ${yen(input.debts)} + 葬式費用 ${yen(input.funeralCosts)} = ${yen(e.deductions)}`]
+    },
+    netEstate: {
+      title: "正味財産 概算",
+      lines: [`課税対象財産 ${yen(e.grossAssets)} - 債務・葬式費用 ${yen(e.deductions)} = ${yen(e.netEstate)}`]
+    },
+    taxableEstate: {
+      title: "課税遺産総額",
+      lines: [`正味財産 ${yen(e.netEstate)} - 基礎控除 ${yen(e.heirs.basicDeduction)} = ${yen(e.taxableEstate)}`]
+    },
+    inheritanceTaxTotal: {
+      title: "相続税総額 概算",
+      note: "配偶者の税額軽減などの税額控除前の概算です。",
+      lines: inheritanceTaxBreakdownLines(e)
+    },
+    insuranceExemption: {
+      title: "死亡保険金非課税枠",
+      lines: [
+        `法定上限：500万円 × 法定相続人 ${e.heirs.heirsForTax}人 = ${yen(5000000 * e.heirs.heirsForTax)}`,
+        `相続人が受け取る死亡保険金入力額：${yen(input.lifeInsuranceHeirs)}`,
+        `非課税枠利用額：min(${yen(input.lifeInsuranceHeirs)}, ${yen(5000000 * e.heirs.heirsForTax)}) = ${yen(e.insuranceExemption)}`
+      ]
+    },
+    taxableInsurance: {
+      title: "課税対象保険金",
+      lines: [`死亡保険金総額 ${yen(input.lifeInsurance)} - 非課税枠利用額 ${yen(e.insuranceExemption)} = ${yen(e.taxableInsurance)}`]
+    },
+    annualGiftTaxPerPerson: {
+      title: "暦年贈与税 / 人・年",
+      lines: [
+        `課税価格：贈与額 ${yen(input.annualGiftPerPerson)} - 基礎控除 ${yen(1100000)} = ${yen(g.annualTaxable)}`,
+        `速算表：${rateLabel(annualTaxable, giftRateRows)}`,
+        `贈与税：${yen(g.annualTaxable)} に速算表を適用 = ${yen(g.annualGiftTaxPerPerson)}`
+      ]
+    },
+    totalAnnualGift: {
+      title: "暦年贈与 移転総額",
+      lines: [`${yen(input.annualGiftPerPerson)} × ${input.annualGiftRecipients}人 × ${input.annualGiftYears}年 = ${yen(g.totalAnnualGift)}`]
+    },
+    totalAnnualGiftTax: {
+      title: "暦年贈与税 合計概算",
+      lines: [`1人1年あたり贈与税 ${yen(g.annualGiftTaxPerPerson)} × ${input.annualGiftRecipients}人 × ${input.annualGiftYears}年 = ${yen(g.totalAnnualGiftTax)}`]
+    },
+    priorGiftAddBack: {
+      title: "相続財産へ加算する贈与額",
+      lines: [
+        `想定相続年：${g.giftAddBack.year}年、加算対象期間目安：${g.giftAddBack.addBackYears}年`,
+        `3年以内贈与：${yen(input.giftsWithin3Years)}`,
+        `4〜7年部分の入力：${yen(input.giftsYears4to7)} × 移行割合 ${Math.round(g.giftAddBack.extendedRatio * 100)}% - ${yen(1000000)} = ${yen(g.giftAddBack.extendedAddBack)}`,
+        `自動計算額：${yen(g.giftAddBack.autoAddBack)}、反映額：${yen(e.priorGiftAddBack)}`
+      ]
+    },
+    settlementTax: {
+      title: "相続時精算課税 贈与税概算",
+      lines: [
+        `年110万円控除後：${yen(input.settlementGift)} - ${yen(1100000)} = ${yen(g.settlementBase)}`,
+        `特別控除残額：${yen(25000000)} - 使用済み ${yen(input.settlementDeductionUsed)} = ${yen(g.remainingSpecial)}`,
+        `課税価格：${yen(g.settlementBase)} - ${yen(g.remainingSpecial)} = ${yen(g.settlementTaxable)}`,
+        `贈与税：${yen(g.settlementTaxable)} × 20% = ${yen(g.settlementTax)}`
+      ]
+    },
+    housingLimit: {
+      title: "住宅資金贈与 非課税枠",
+      lines: [`住宅区分：${input.housingType}、非課税枠 = ${yen(g.housingLimit)}`]
+    },
+    housingTaxable: {
+      title: "住宅資金贈与 課税候補",
+      lines: [`住宅資金贈与 ${yen(input.housingGift)} - 非課税枠 ${yen(g.housingLimit)} = ${yen(g.housingTaxable)}`]
+    },
+    illiquidRatio: {
+      title: "不動産・事業資産比率",
+      lines: [
+        `固定的・分けにくい資産：自宅 ${yen(input.homeProperty)} + 貸付不動産 ${yen(input.rentalProperty)} + 事業資産 ${yen(input.businessAssets)} = ${yen(e.illiquid)}`,
+        `総財産 ${yen(e.grossAssets)} に占める割合：${yen(e.illiquid)} ÷ ${yen(e.grossAssets)} = ${pct(e.illiquidRatio)}`
+      ]
+    },
+    cashShortage: {
+      title: "納税資金不足目安",
+      lines: [
+        `使える現預金目安：現預金 ${yen(input.cash)} - 生活費・予備資金 ${yen(input.cashReserveTarget)} = ${yen(num(input.cash) - num(input.cashReserveTarget))}`,
+        `相続税総額概算 ${yen(e.inheritanceTaxTotal)} - 使える現預金目安 = ${yen(cashShortage)}`
+      ]
+    },
+    cash: {
+      title: "現預金",
+      lines: [`入力値：${yen(input.cash)}`]
+    }
+  };
+}
+
 function calcActionEffect() {
   const beforeInput = normalizeState({ ...state });
   const before = calcEstate(beforeInput);
@@ -566,11 +731,11 @@ function getActionRecommendations(input = state) {
   return recommendations.sort((a, b) => b.priority - a.priority).slice(0, 3);
 }
 
-function makeCard(label, value, note = "") {
+function makeCard(label, value, note = "", breakdownKey = "") {
   const tpl = document.getElementById("cardTemplate");
   const node = tpl.content.firstElementChild.cloneNode(true);
   node.querySelector(".label").textContent = label;
-  node.querySelector(".value").textContent = value;
+  node.querySelector(".value").innerHTML = calcValueHtml(value, breakdownKey);
   node.querySelector(".note").textContent = note;
   return node;
 }
@@ -579,7 +744,7 @@ function renderCards(id, cards) {
   const el = document.getElementById(id);
   if (!el) return;
   el.innerHTML = "";
-  cards.forEach((c) => el.appendChild(makeCard(c[0], c[1], c[2])));
+  cards.forEach((c) => el.appendChild(makeCard(c[0], c[1], c[2], c[3])));
 }
 
 function switchTab(tabId) {
@@ -615,6 +780,16 @@ function renderStepNavigation() {
   });
 }
 
+function svgBar(width, color) {
+  const safeWidth = Math.max(0, Math.min(100, num(width)));
+  return `
+    <svg class="bar-svg" viewBox="0 0 100 10" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+      <rect x="0" y="0" width="100" height="10" rx="5" fill="#edf3f6"></rect>
+      <rect x="0" y="0" width="${safeWidth.toFixed(2)}" height="10" rx="5" fill="${color}"></rect>
+    </svg>
+  `;
+}
+
 function chartBlock(title, subtitle, rows, options = {}) {
   const valueFormatter = options.valueFormatter || yen;
   const visibleRows = rows.filter((row) => num(row.value) > 0 || row.keepZero);
@@ -623,13 +798,14 @@ function chartBlock(title, subtitle, rows, options = {}) {
     ? visibleRows.map((row, i) => {
         const value = Math.max(0, num(row.value));
         const width = Math.max(value > 0 ? 3 : 0, Math.min(100, (value / max) * 100));
+        const color = CHART_COLORS[i % 5];
         return `
           <div class="chart-row">
             <div class="chart-row-head">
               <span>${esc(row.label)}</span>
-              <b>${esc(row.display ?? valueFormatter(value))}</b>
+              <b>${calcValueHtml(row.display ?? valueFormatter(value), row.breakdown)}</b>
             </div>
-            <div class="chart-track"><span class="chart-fill tone-${(i % 5) + 1}" style="width:${width}%"></span></div>
+            <div class="chart-track">${svgBar(width, color)}</div>
             ${row.note ? `<small>${esc(row.note)}</small>` : ""}
           </div>
         `;
@@ -655,10 +831,10 @@ function comparisonChartBlock(title, subtitle, rows) {
             <div class="chart-row-head"><span>${esc(row.label)}</span><b>${esc(row.note || "")}</b></div>
             <div class="compare-bars">
               <span class="compare-label">現状</span>
-              <div class="chart-track"><span class="chart-fill compare-before" style="width:${Math.max(before > 0 ? 3 : 0, (before / max) * 100)}%"></span></div>
+              <div class="chart-track">${svgBar(Math.max(before > 0 ? 3 : 0, (before / max) * 100), "#8ca3ad")}</div>
               <b>${yen(before)}</b>
               <span class="compare-label">対策後</span>
-              <div class="chart-track"><span class="chart-fill compare-after" style="width:${Math.max(after > 0 ? 3 : 0, (after / max) * 100)}%"></span></div>
+              <div class="chart-track">${svgBar(Math.max(after > 0 ? 3 : 0, (after / max) * 100), "#578899")}</div>
               <b>${yen(after)}</b>
             </div>
           </div>
@@ -676,7 +852,7 @@ function comparisonChartBlock(title, subtitle, rows) {
 
 function pieChartBlock(title, subtitle, rows, options = {}) {
   const valueFormatter = options.valueFormatter || yen;
-  const colors = options.colors || ["#578899", "#6b8f71", "#b7791f", "#7c6f99", "#9a6b5b", "#4f7c8c", "#8a7f5a"];
+  const colors = options.colors || CHART_COLORS;
   const visibleRows = rows.filter((row) => num(row.value) > 0);
   const total = visibleRows.reduce((sum, row) => sum + num(row.value), 0);
   if (!visibleRows.length || total <= 0) {
@@ -689,21 +865,30 @@ function pieChartBlock(title, subtitle, rows, options = {}) {
     `;
   }
 
-  let cursor = 0;
-  const stops = visibleRows.map((row, i) => {
-    const start = cursor;
-    cursor += (num(row.value) / total) * 100;
-    return `${colors[i % colors.length]} ${start.toFixed(2)}% ${cursor.toFixed(2)}%`;
-  }).join(", ");
+  const radius = 38;
+  const circumference = 2 * Math.PI * radius;
+  let offset = 0;
+  const segments = visibleRows.map((row, i) => {
+    const ratio = num(row.value) / total;
+    const dash = ratio * circumference;
+    const gap = Math.max(0, circumference - dash);
+    const segment = `
+      <circle cx="50" cy="50" r="${radius}" fill="none" stroke="${colors[i % colors.length]}" stroke-width="24"
+        stroke-dasharray="${dash.toFixed(3)} ${gap.toFixed(3)}" stroke-dashoffset="${(-offset).toFixed(3)}"
+        transform="rotate(-90 50 50)"></circle>
+    `;
+    offset += dash;
+    return segment;
+  }).join("");
 
   const legend = visibleRows.map((row, i) => {
     const value = num(row.value);
     const ratio = total ? value / total : 0;
     return `
       <div class="pie-legend-row">
-        <span class="pie-dot" style="background:${colors[i % colors.length]}"></span>
+        <svg class="pie-dot" viewBox="0 0 10 10" aria-hidden="true" focusable="false"><circle cx="5" cy="5" r="5" fill="${colors[i % colors.length]}"></circle></svg>
         <span>${esc(row.label)}</span>
-        <b>${esc(valueFormatter(value))}</b>
+        <b>${calcValueHtml(valueFormatter(value), row.breakdown)}</b>
         <em>${pct(ratio)}</em>
       </div>
     `;
@@ -715,7 +900,12 @@ function pieChartBlock(title, subtitle, rows, options = {}) {
       ${subtitle ? `<p>${esc(subtitle)}</p>` : ""}
     </div>
     <div class="pie-layout">
-      <div class="donut" style="background:conic-gradient(${stops})">
+      <div class="donut">
+        <svg class="donut-svg" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
+          <circle cx="50" cy="50" r="${radius}" fill="none" stroke="#edf3f6" stroke-width="24"></circle>
+          ${segments}
+          <circle cx="50" cy="50" r="26" fill="#ffffff" stroke="#dbe4ea" stroke-width="1"></circle>
+        </svg>
         <div><strong>${esc(valueFormatter(total))}</strong><span>${esc(options.centerLabel || "合計")}</span></div>
       </div>
       <div class="pie-legend">${legend}</div>
@@ -765,37 +955,37 @@ function render() {
   const giftAddBackLabel = state.priorGiftMode === "manual" ? "手入力" : `${g.giftAddBack.addBackYears}年目安`;
 
   renderCards("familyResults", [
-    ["法定相続人の数（税額計算用）", `${e.heirs.heirsForTax}人`, `養子算入：${e.heirs.adoptedForTax}人 / 相続順位：${e.heirs.rank}`],
-    ["基礎控除額", yen(e.heirs.basicDeduction), "3,000万円 + 600万円 × 法定相続人"],
+    ["法定相続人の数（税額計算用）", `${e.heirs.heirsForTax}人`, `養子算入：${e.heirs.adoptedForTax}人 / 相続順位：${e.heirs.rank}`, "heirsForTax"],
+    ["基礎控除額", yen(e.heirs.basicDeduction), "3,000万円 + 600万円 × 法定相続人", "basicDeduction"],
     ["法定相続分の概略", e.heirs.shares.map((s) => `${s.label} ${pct(s.share)}`).join(" / "), "詳細な相続関係は別途確認"]
   ]);
 
   renderCards("assetResults", [
-    ["課税対象財産 概算", yen(e.grossAssets), "死亡保険金の非課税控除後・過去贈与加算含む"],
-    ["債務・葬式費用", yen(e.deductions), "第1版では単純控除"],
-    ["正味財産 概算", yen(e.netEstate), "小規模宅地等の特例は未反映"],
-    ["不動産・事業資産比率", pct(e.illiquidRatio), "分割困難・納税資金リスクの目安"],
-    ["死亡保険金非課税枠", yen(e.insuranceExemption), "500万円 × 法定相続人の数"],
-    ["課税対象保険金", yen(e.taxableInsurance), "受取人・契約者・被保険者の確認が必要"]
+    ["課税対象財産 概算", yen(e.grossAssets), "死亡保険金の非課税控除後・過去贈与加算含む", "grossAssets"],
+    ["債務・葬式費用", yen(e.deductions), "第1版では単純控除", "deductions"],
+    ["正味財産 概算", yen(e.netEstate), "小規模宅地等の特例は未反映", "netEstate"],
+    ["不動産・事業資産比率", pct(e.illiquidRatio), "分割困難・納税資金リスクの目安", "illiquidRatio"],
+    ["死亡保険金非課税枠", yen(e.insuranceExemption), "500万円 × 法定相続人の数", "insuranceExemption"],
+    ["課税対象保険金", yen(e.taxableInsurance), "受取人・契約者・被保険者の確認が必要", "taxableInsurance"]
   ]);
 
   renderCards("giftResults", [
-    ["暦年贈与税 / 人・年", yen(g.annualGiftTaxPerPerson), `課税価格 ${yen(g.annualTaxable)}`],
-    ["暦年贈与 移転総額", yen(g.totalAnnualGift), `${state.annualGiftRecipients || 0}人 × ${state.annualGiftYears || 0}年`],
-    ["暦年贈与税 合計概算", yen(g.totalAnnualGiftTax), "生前贈与加算対象期間に注意"],
-    ["相続財産へ加算する贈与額", yen(e.priorGiftAddBack), giftAddBackLabel],
-    ["相続時精算課税 贈与税概算", yen(g.settlementTax), `残特別控除 ${yen(g.remainingSpecial)}`],
-    ["住宅資金贈与 非課税枠", yen(g.housingLimit), "要件・期限・証明書類の確認が必要"],
-    ["住宅資金贈与 課税候補", yen(g.housingTaxable), "暦年または精算課税との関係を確認"]
+    ["暦年贈与税 / 人・年", yen(g.annualGiftTaxPerPerson), `課税価格 ${yen(g.annualTaxable)}`, "annualGiftTaxPerPerson"],
+    ["暦年贈与 移転総額", yen(g.totalAnnualGift), `${state.annualGiftRecipients || 0}人 × ${state.annualGiftYears || 0}年`, "totalAnnualGift"],
+    ["暦年贈与税 合計概算", yen(g.totalAnnualGiftTax), "生前贈与加算対象期間に注意", "totalAnnualGiftTax"],
+    ["相続財産へ加算する贈与額", yen(e.priorGiftAddBack), giftAddBackLabel, "priorGiftAddBack"],
+    ["相続時精算課税 贈与税概算", yen(g.settlementTax), `残特別控除 ${yen(g.remainingSpecial)}`, "settlementTax"],
+    ["住宅資金贈与 非課税枠", yen(g.housingLimit), "要件・期限・証明書類の確認が必要", "housingLimit"],
+    ["住宅資金贈与 課税候補", yen(g.housingTaxable), "暦年または精算課税との関係を確認", "housingTaxable"]
   ]);
 
   renderCards("diagnosisResults", [
-    ["正味財産", yen(e.netEstate), "概算"],
-    ["課税遺産総額", yen(e.taxableEstate), "正味財産 − 基礎控除"],
-    ["相続税総額 概算", yen(e.inheritanceTaxTotal), "税額控除前の概算"],
-    ["現預金総額", yen(num(state.cash)), "生活費・予備資金を含む"],
-    ["納税資金不足目安", yen(Math.max(0, e.inheritanceTaxTotal - (num(state.cash) - num(state.cashReserveTarget)))), "現預金から生活費・予備資金を控除"],
-    ["生前贈与加算額", yen(e.priorGiftAddBack), "相続税の課税価格に加算する概算"]
+    ["正味財産", yen(e.netEstate), "概算", "netEstate"],
+    ["課税遺産総額", yen(e.taxableEstate), "正味財産 − 基礎控除", "taxableEstate"],
+    ["相続税総額 概算", yen(e.inheritanceTaxTotal), "税額控除前の概算", "inheritanceTaxTotal"],
+    ["現預金総額", yen(num(state.cash)), "生活費・予備資金を含む", "cash"],
+    ["納税資金不足目安", yen(Math.max(0, e.inheritanceTaxTotal - (num(state.cash) - num(state.cashReserveTarget)))), "現預金から生活費・予備資金を控除", "cashShortage"],
+    ["生前贈与加算額", yen(e.priorGiftAddBack), "相続税の課税価格に加算する概算", "priorGiftAddBack"]
   ]);
 
   renderAssetChart(e);
@@ -818,7 +1008,7 @@ function render() {
 
 function renderAssetChart(e) {
   renderPieChart("assetChart", "資産構成の見える化", "財産全体に占める構成比を確認します。換金性・分割困難性の会話に使います。", [
-    { label: "現預金", value: state.cash },
+    { label: "現預金", value: state.cash, breakdown: "cash" },
     { label: "上場株式・投信等", value: state.securities },
     { label: "自宅土地建物", value: state.homeProperty },
     { label: "貸付不動産", value: state.rentalProperty },
@@ -832,13 +1022,13 @@ function renderAssetChart(e) {
 
 function renderGiftChart(g, e) {
   renderChart("giftChart", "贈与・保険の論点比較", "移転額、贈与税コスト、相続財産への加算額、保険非課税枠を同じ尺度で確認します。", [
-    { label: "暦年贈与 移転総額", value: g.totalAnnualGift },
-    { label: "暦年贈与税 合計概算", value: g.totalAnnualGiftTax },
-    { label: "相続財産へ加算する贈与額", value: e.priorGiftAddBack },
+    { label: "暦年贈与 移転総額", value: g.totalAnnualGift, breakdown: "totalAnnualGift" },
+    { label: "暦年贈与税 合計概算", value: g.totalAnnualGiftTax, breakdown: "totalAnnualGiftTax" },
+    { label: "相続財産へ加算する贈与額", value: e.priorGiftAddBack, breakdown: "priorGiftAddBack" },
     { label: "相続時精算課税 贈与予定額", value: state.settlementGift },
-    { label: "相続時精算課税 贈与税概算", value: g.settlementTax },
-    { label: "死亡保険金非課税枠", value: e.insuranceExemption },
-    { label: "住宅資金贈与 非課税枠", value: g.housingLimit }
+    { label: "相続時精算課税 贈与税概算", value: g.settlementTax, breakdown: "settlementTax" },
+    { label: "死亡保険金非課税枠", value: e.insuranceExemption, breakdown: "insuranceExemption" },
+    { label: "住宅資金贈与 非課税枠", value: g.housingLimit, breakdown: "housingLimit" }
   ]);
 }
 
@@ -1281,6 +1471,19 @@ function openSource(key) {
   document.getElementById("sourceDialog").showModal();
 }
 
+function openCalculationBreakdown(key) {
+  const item = getCalculationBreakdowns(state)[key];
+  if (!item) return;
+  document.getElementById("calcTitle").textContent = item.title;
+  document.getElementById("calcBody").innerHTML = `
+    ${item.note ? `<p class="calc-note-box">${esc(item.note)}</p>` : ""}
+    <ol class="calc-lines">
+      ${item.lines.map((line, index) => `<li><b>${index + 1}</b><code>${esc(line)}</code></li>`).join("")}
+    </ol>
+  `;
+  document.getElementById("calcDialog").showModal();
+}
+
 function collectStateFromInputs() {
   document.querySelectorAll("[data-field]").forEach((el) => {
     const key = el.dataset.field;
@@ -1335,6 +1538,11 @@ if (typeof document !== "undefined") {
   });
 
   document.addEventListener("click", (e) => {
+    const breakdown = e.target.closest("[data-breakdown]");
+    if (breakdown) {
+      openCalculationBreakdown(breakdown.dataset.breakdown);
+      return;
+    }
     const stepTarget = e.target.closest("[data-step-target]");
     if (stepTarget) {
       switchTab(stepTarget.dataset.stepTarget);
@@ -1355,6 +1563,7 @@ if (typeof document !== "undefined") {
   });
 
   document.getElementById("closeSource").addEventListener("click", () => document.getElementById("sourceDialog").close());
+  document.getElementById("closeCalc").addEventListener("click", () => document.getElementById("calcDialog").close());
   document.getElementById("saveBtn").addEventListener("click", () => {
     collectStateFromInputs();
     localStorage.setItem("shisan-shokei-navi", JSON.stringify(state));
