@@ -34,6 +34,7 @@
       <button class="tab result-tab" data-tab="diagnosis"><span>現状診断</span><small>結果確認</small></button>
       <button class="tab" data-tab="actions">打ち手比較</button>
       <button class="tab" data-tab="report">面談レポート</button>
+      <button class="tab result-tab" data-tab="tps"><span>TPS8200転記表</span><small>手入力</small></button>
       <button class="tab" data-tab="sources">根拠一覧</button>
     </nav>
 
@@ -461,6 +462,23 @@
         </div>
 
         <div id="reportView" class="report-view"></div>
+      </section>
+
+      <section class="panel tab-panel" id="tps">
+        <div class="section-head">
+          <div>
+            <h2>TPS8200転記表</h2>
+            <p>面談結果をTPS8200へ手入力するための対応表です。明細化が必要な項目と、そのまま転記できる概算値を分けて確認します。</p>
+          </div>
+          <button type="button" class="primary print-action">印刷</button>
+        </div>
+
+        <div class="notice">
+          <strong>前提</strong>
+          <p>TPS8200側にインポート機能がない前提で、入力画面ごとの転記先を整理します。家族別・財産別の明細、受取人、生年月日、土地建物の評価要素はTPS8200側で個別入力してください。</p>
+        </div>
+
+        <div id="tpsMappingView" class="tps-mapping-view"></div>
       </section>
 
       <section class="panel tab-panel" id="sources">

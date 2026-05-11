@@ -116,6 +116,7 @@ const tabFlow = [
   ["diagnosis", "現状診断"],
   ["actions", "打ち手比較"],
   ["report", "面談レポート"],
+  ["tps", "TPS8200転記表"],
   ["sources", "根拠一覧"]
 ];
 
@@ -1058,6 +1059,7 @@ function render() {
   renderTaskSuggestions();
   renderSources();
   renderReport();
+  renderTpsMapping();
   renderSummary();
   renderStepNavigation();
 }
@@ -1488,6 +1490,254 @@ function renderReport() {
   `;
 }
 
+function tpsStatusClass(status) {
+  if (status === "転記") return "copy";
+  if (status === "要内訳") return "detail";
+  if (status === "別途確認") return "confirm";
+  if (status === "照合") return "check";
+  return "reference";
+}
+
+function yesNo(value) {
+  return value === "yes" ? "あり" : value === "no" ? "なし" : "未確認";
+}
+
+function getTpsMappingRows(input = state) {
+  const e = calcEstate(input);
+  const g = calcGift(input);
+  const effect = calcActionEffect();
+  const actionTitles = actionDefinitions().filter((def) => input[def.enabled]).map((def) => def.title);
+  const spouseText = input.hasSpouse === "yes" ? "あり" : "なし";
+  const familyCounts = [
+    `配偶者 ${spouseText}`,
+    `実子 ${e.heirs.naturalChildren}人`,
+    `養子 ${e.heirs.adopted}人`,
+    `父母等 ${e.heirs.parents}人`,
+    `兄弟姉妹等 ${e.heirs.siblings}人`
+  ].join(" / ");
+  const taxHeirText = `${e.heirs.heirsForTax}人（養子の税法算入 ${e.heirs.adoptedForTax}人）`;
+  const settlementText = [
+    `贈与予定 ${yen(input.settlementGift)}`,
+    `年110万円控除後 ${yen(g.settlementBase)}`,
+    `特別控除残 ${yen(g.remainingSpecial)}`,
+    `概算税額 ${yen(g.settlementTax)}`
+  ].join(" / ");
+  const actionText = actionTitles.length
+    ? `${actionTitles.join(" / ")}（相続税概算差額 ${yen(effect.taxReduction)}）`
+    : "未選択";
+
+  return [
+    {
+      group: "1. 財産所有者",
+      tps: "財産所有者の入力 > 氏名",
+      source: "相談者名・案件名",
+      value: input.caseName || "未入力",
+      status: "要内訳",
+      note: "案件名と本人名が混在している場合は、TPS8200では財産所有者本人の氏名へ分解して入力します。"
+    },
+    {
+      group: "1. 財産所有者",
+      tps: "財産所有者の入力 > 生年月日",
+      source: "本ツールでは未入力",
+      value: "別途確認",
+      status: "別途確認",
+      note: "TPS8200では年齢計算に使うため必須です。面談メモや本人確認資料から補完します。"
+    },
+    {
+      group: "2. 家族構成",
+      tps: "家族構成の入力 > 家族一覧",
+      source: "家族構成タブ",
+      value: familyCounts,
+      status: "要内訳",
+      note: "本ツールは人数集計です。TPS8200では氏名・続柄・親族区分・相続区分・生年月日・養子区分を1人ずつ入力します。"
+    },
+    {
+      group: "2. 家族構成",
+      tps: "家族構成の入力 > 相続税法上の相続人",
+      source: "法定相続人の数",
+      value: taxHeirText,
+      status: "照合",
+      note: "本ツールでは実子あり1人、実子なし2人までの養子算入制限を反映しています。TPS8200の自動判定結果と照合します。"
+    },
+    {
+      group: "3. 所有財産",
+      tps: "所有財産 > 現金・預貯金等",
+      source: "現預金",
+      value: yen(input.cash),
+      status: "転記",
+      note: "銀行別・口座別の明細がある場合はTPS8200側で行を分けます。"
+    },
+    {
+      group: "3. 所有財産",
+      tps: "所有財産 > 有価証券",
+      source: "上場株式・投信等",
+      value: yen(input.securities),
+      status: "要内訳",
+      note: "銘柄・数量・評価額の明細へ分解します。非上場株式はTPS8100等の評価結果複写も検討します。"
+    },
+    {
+      group: "3. 所有財産",
+      tps: "所有財産 > 土地等 / 家屋・構築物",
+      source: "自宅土地建物",
+      value: yen(input.homeProperty),
+      status: "要内訳",
+      note: "土地と家屋に分け、所在地番・地積/床面積・固定資産税評価額・倍率・共有持分を入力します。"
+    },
+    {
+      group: "3. 所有財産",
+      tps: "所有財産 > 土地等 / 家屋・構築物",
+      source: "貸付不動産",
+      value: yen(input.rentalProperty),
+      status: "要内訳",
+      note: "貸家建付地・貸家などの評価要素、賃貸状況、借入金との対応をTPS8200側で確認します。"
+    },
+    {
+      group: "3. 所有財産",
+      tps: "所有財産 > 事業用財産 / 有価証券 / その他の財産",
+      source: "非上場株式・事業用資産",
+      value: yen(input.businessAssets),
+      status: "要内訳",
+      note: "会社株価対策の検討対象です。TPS8100等で株価評価を行い、TPS8200へ評価結果を反映します。"
+    },
+    {
+      group: "3. 所有財産",
+      tps: "所有財産 > その他の財産",
+      source: "その他財産",
+      value: yen(input.otherAssets),
+      status: "要内訳",
+      note: "家庭用財産、未収金、その他財産などTPS8200の細目に合わせて振り分けます。"
+    },
+    {
+      group: "4. 生命保険金等・退職手当金等",
+      tps: "生命保険金等 > 受取人・受取金額",
+      source: "生命保険",
+      value: `総額 ${yen(input.lifeInsurance)} / 相続人受取 ${yen(input.lifeInsuranceHeirs)} / 非課税枠 ${yen(e.insuranceExemption)}`,
+      status: "要内訳",
+      note: "TPS8200では受取人を家族一覧から選択します。非課税枠は500万円×相続人の数で照合します。"
+    },
+    {
+      group: "4. 生命保険金等・退職手当金等",
+      tps: "退職手当金等",
+      source: "本ツールでは未入力",
+      value: "別途確認",
+      status: "別途確認",
+      note: "死亡退職金・弔慰金見込がある場合は、支給規程と受取人を確認してTPS8200へ入力します。"
+    },
+    {
+      group: "5. 債務等",
+      tps: "債務等 > 銀行借入金・その他",
+      source: "債務",
+      value: yen(input.debts),
+      status: "要内訳",
+      note: "借入先・残高・債務の種類ごとにTPS8200の債務等へ入力します。"
+    },
+    {
+      group: "5. 債務等",
+      tps: "債務等 > 葬式費用",
+      source: "葬式費用",
+      value: yen(input.funeralCosts),
+      status: "転記",
+      note: "見込額の場合は、実際の支払時に再確認します。"
+    },
+    {
+      group: "6. 過去に贈与した相続時精算課税適用財産",
+      tps: "相続時精算課税適用財産 > 合計額",
+      source: "相続時精算課税 贈与予定額",
+      value: settlementText,
+      status: "照合",
+      note: "令和6年以後の贈与は年110万円基礎控除後の額をTPS8200へ入力します。過去分と予定分は資料で区別します。"
+    },
+    {
+      group: "7. 小規模宅地等の特例",
+      tps: "小規模宅地等の特例の適用",
+      source: "同居親族・自宅承継予定",
+      value: `同居親族 ${yesNo(input.coResident)} / 自宅承継予定 ${yesNo(input.homePlanChild)}`,
+      status: "別途確認",
+      note: "本ツールでは特例額を自動反映していません。対象宅地・面積・取得者をTPS8200側で判定します。"
+    },
+    {
+      group: "8. 現状の相続税の試算",
+      tps: "現状の相続税の試算",
+      source: "現状診断",
+      value: `正味財産 ${yen(e.netEstate)} / 課税遺産 ${yen(e.taxableEstate)} / 相続税概算 ${yen(e.inheritanceTaxTotal)}`,
+      status: "照合",
+      note: "TPS8200で明細入力後、概算差が大きい場合は土地評価・保険受取人・債務控除・贈与加算を優先確認します。"
+    },
+    {
+      group: "9. 暦年課税・相続時精算課税の比較表",
+      tps: "暦年課税・相続時精算課税の比較表",
+      source: "贈与・保険タブ",
+      value: `暦年贈与総額 ${yen(g.totalAnnualGift)} / 暦年贈与税 ${yen(g.totalAnnualGiftTax)} / 精算課税予定 ${yen(input.settlementGift)}`,
+      status: "参考",
+      note: "受贈者別の生年月日・続柄・課税方式はTPS8200またはgift-tax側で詳細確認します。"
+    },
+    {
+      group: "対策案",
+      tps: "相続対策アクションプラン",
+      source: "打ち手比較",
+      value: actionText,
+      status: "参考",
+      note: "現状入力後、生命保険加入・贈与・財産評価下げ・資産組替え等の対策欄へ必要に応じて手入力します。"
+    }
+  ];
+}
+
+function renderTpsMapping() {
+  const wrap = document.getElementById("tpsMappingView");
+  if (!wrap) return;
+  const rows = getTpsMappingRows(state);
+  wrap.innerHTML = `
+    <section class="report-block tps-cover">
+      <h3>転記対象案件</h3>
+      <div class="tps-summary-grid">
+        <div><span>案件</span><b>${esc(state.caseName || "未入力")}</b></div>
+        <div><span>面談日</span><b>${esc(state.meetingDate || "未入力")}</b></div>
+        <div><span>担当</span><b>${esc(state.staffName || "未入力")}</b></div>
+        <div><span>作成</span><b>${esc(VERSION)}</b></div>
+      </div>
+    </section>
+    <section class="report-block">
+      <h3>TPS8200入力項目マッピング</h3>
+      <div class="table-wrap">
+        <table class="tps-map-table">
+          <thead>
+            <tr>
+              <th>区分</th>
+              <th>TPS8200の入力先</th>
+              <th>本ツールの項目</th>
+              <th>転記・確認する値</th>
+              <th>扱い</th>
+              <th>確認メモ</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map((row) => `
+              <tr>
+                <td class="tps-group">${esc(row.group)}</td>
+                <td>${esc(row.tps)}</td>
+                <td>${esc(row.source)}</td>
+                <td class="tps-value">${esc(row.value)}</td>
+                <td><span class="tps-status ${tpsStatusClass(row.status)}">${esc(row.status)}</span></td>
+                <td>${esc(row.note)}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    <section class="report-block tps-checklist">
+      <h3>TPS8200入力前に追加で集める資料</h3>
+      <ul>
+        <li>財産所有者・推定相続人・受取人の氏名、生年月日、続柄、住所、養子区分</li>
+        <li>土地建物の固定資産税評価明細、登記情報、地積・床面積、利用状況、賃貸借条件</li>
+        <li>保険証券、死亡退職金・弔慰金の規程、借入金残高、葬式費用見込</li>
+        <li>過去贈与の契約書・申告書・受贈者別明細、相続時精算課税の既使用控除額</li>
+        <li>非上場株式・事業用資産はTPS8100等の評価資料、役員借入金、類似業種比準要素、純資産資料</li>
+      </ul>
+    </section>
+  `;
+}
+
 function renderSummary() {
   const e = calcEstate(state);
   const r = diagnoseRisks(state);
@@ -1557,6 +1807,19 @@ function collectStateFromInputs() {
     else state[key] = el.hasAttribute("data-money") ? toNumber(el.value) : el.value;
   });
   state = normalizeState(state);
+}
+
+function clearPrintScope() {
+  document.body.classList.remove("print-scoped");
+  document.querySelectorAll(".tab-panel.print-target").forEach((panel) => panel.classList.remove("print-target"));
+}
+
+function setPrintScope(button) {
+  clearPrintScope();
+  const panel = button.closest(".tab-panel");
+  if (!panel) return;
+  document.body.classList.add("print-scoped");
+  panel.classList.add("print-target");
 }
 
 function formatMoneyInput(el) {
@@ -1654,11 +1917,16 @@ if (typeof document !== "undefined") {
     btn.addEventListener("click", () => {
       collectStateFromInputs();
       render();
+      setPrintScope(btn);
       const warnings = getReportWarnings(state);
-      if (warnings.length && !confirm(`印刷前の確認項目があります。\n\n${warnings.join("\n")}\n\nこのまま印刷しますか？`)) return;
+      if (warnings.length && !confirm(`印刷前の確認項目があります。\n\n${warnings.join("\n")}\n\nこのまま印刷しますか？`)) {
+        clearPrintScope();
+        return;
+      }
       window.print();
     });
   });
+  window.addEventListener("afterprint", clearPrintScope);
   document.getElementById("importFile").addEventListener("change", async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
