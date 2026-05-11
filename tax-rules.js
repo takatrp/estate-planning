@@ -10,16 +10,19 @@ export const TaxRules = {
       sourceTitle: "運用上の注意",
       url: "",
       lastChecked: "2026-04-27",
-      summary: "本ツールは、面談時にクライアントと同じ画面を見ながら概算把握・論点整理・打ち手比較を行うための支援ツールです。土地評価、小規模宅地等の特例、非上場株式評価、遺留分、信託・法人化などは個別検討とします。",
+      summary: "本ツールは、概算把握・論点整理・打ち手比較を行うための支援ツールです。土地評価、小規模宅地等の特例、非上場株式評価、死亡退職金、遺留分、信託・法人化などは個別検討とします。",
       usage: ["概要", "出力レポート"]
     },
     inheritance_basic: {
       title: "相続税の基礎控除・法定相続人の数",
       sourceTitle: "国税庁 No.4152 相続税の計算",
       url: "https://www.nta.go.jp/taxes/shiraberu/taxanswer/sozoku/4152.htm",
-      lastChecked: "2026-04-27",
+      lastChecked: "2026-05-11",
       formula: "3,000万円 + 600万円 × 法定相続人の数",
-      summary: "相続税の基礎控除、養子の算入制限、課税遺産総額の基本計算に使用します。",
+      summary: "相続税の基礎控除、養子の算入制限（実子あり1人、実子なし2人まで）、課税遺産総額の基本計算に使用します。",
+      legalRefs: [
+        { title: "相続税法 第15条第2項", url: "https://elaws.e-gov.go.jp/document?lawid=325AC0000000073" }
+      ],
       usage: ["家族構成", "現状診断", "二次相続"]
     },
     inheritance_tax_rate: {
@@ -42,9 +45,12 @@ export const TaxRules = {
       title: "死亡保険金の非課税限度額",
       sourceTitle: "国税庁 No.4114 相続税の課税対象になる死亡保険金",
       url: "https://www.nta.go.jp/taxes/shiraberu/taxanswer/sozoku/4114.htm",
-      lastChecked: "2026-04-27",
+      lastChecked: "2026-05-11",
       formula: "500万円 × 法定相続人の数",
-      summary: "被相続人が保険料を負担し、相続人が受け取る死亡保険金の非課税枠を確認します。",
+      summary: "被相続人が保険料を負担し、相続人が受け取る死亡保険金の非課税枠を確認します。法定相続人の数には養子の算入制限を反映します。",
+      legalRefs: [
+        { title: "相続税法 第12条第1項第5号", url: "https://elaws.e-gov.go.jp/document?lawid=325AC0000000073" }
+      ],
       usage: ["贈与・保険", "納税資金"]
     },
     annual_gift: {
@@ -68,9 +74,12 @@ export const TaxRules = {
       title: "相続時精算課税",
       sourceTitle: "国税庁 No.4103 相続時精算課税の選択",
       url: "https://www.nta.go.jp/taxes/shiraberu/taxanswer/sozoku/4103.htm",
-      lastChecked: "2026-04-27",
+      lastChecked: "2026-05-11",
       formula: "各年110万円控除 + 特別控除2,500万円、超過部分20%",
-      summary: "令和6年以後は特定贈与者ごとに年間110万円の基礎控除があります。一度選択すると同じ贈与者からの贈与は暦年課税に戻れません。",
+      summary: "令和6年以後は特定贈与者ごとに年間110万円の基礎控除があります。本ツールでは110万円控除後に特別控除2,500万円の残額を判定します。一度選択すると同じ贈与者からの贈与は暦年課税に戻れません。",
+      legalRefs: [
+        { title: "租税特別措置法 第70条の2の4", url: "https://elaws.e-gov.go.jp/document?lawid=332AC0000000026" }
+      ],
       usage: ["贈与・保険", "打ち手"]
     },
     spouse_home_gift: {

@@ -180,6 +180,13 @@ tr:last-child td{border-bottom:0}
 .source-item h3{margin:0 0 6px;font-size:1rem}
 .source-item p{margin:.35rem 0;color:var(--muted);font-size:.92rem}
 .source-item a{color:var(--brand-dark);font-weight:700}
+footer.mk-mini{
+  text-align:center;
+  font-size:12px;
+  color:var(--muted);
+  padding:20px;
+}
+footer.mk-mini a{color:inherit}
 .side-panel{position:sticky;top:16px;height:max-content}
 .compact{padding-left:1.2rem;color:var(--muted)}
 #liveSummary .mini{border-bottom:1px solid var(--line);padding:7px 0}
@@ -218,7 +225,7 @@ tr:last-child td{border-bottom:0}
 }
 @media print{
   body{background:#fff}
-  .app-header,.tabs,.side-panel,.header-actions,.print-hide,.source-btn,.tool-link-panel{display:none!important}
+  .app-header,.tabs,.side-panel,.header-actions,.print-hide,.source-btn,.tool-link-panel,footer.mk-mini{display:none!important}
   .layout{display:block;padding:0}
   .panel{box-shadow:none;border:0;border-radius:0;padding:0}
   .tab-panel{display:block!important;break-inside:avoid;margin-bottom:18px}

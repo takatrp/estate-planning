@@ -19,6 +19,15 @@
 - `styles.css`：デザイン
 - `app.js`：入力、計算、表示ロジック
 - `tax-rules.js`：税制マスタ、税率表、根拠リンク
+- `tests/legal-logic.test.mjs`：養子算入制限、生命保険非課税枠、相続時精算課税の回帰テスト
+
+## ロジック検証
+
+税法上の人数制限や控除順序が壊れていないか、次のコマンドで確認します。
+
+```bash
+node --test tests/legal-logic.test.mjs
+```
 
 ## 贈与税ツールとの連携
 

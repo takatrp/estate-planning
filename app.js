@@ -1,6 +1,6 @@
 import { TaxRules } from "./tax-rules.js";
 
-const defaults = {
+export const defaults = {
   caseName: "",
   meetingDate: new Date().toISOString().slice(0, 10),
   staffName: "",
@@ -76,7 +76,7 @@ const moneyFields = new Set([
 
 let state = normalizeState({ ...defaults });
 
-function normalizeState(input) {
+export function normalizeState(input) {
   const out = { ...defaults, ...input };
   for (const field of moneyFields) out[field] = toNumber(out[field]);
   ["childrenCount", "adoptedCount", "parentsCount", "siblingsCount", "annualGiftRecipients", "annualGiftYears", "actionAnnualGiftRecipients", "actionAnnualGiftYears", "assumedInheritanceYear"].forEach((field) => {
@@ -106,6 +106,7 @@ const comma = (v) => {
 const pct = (v) => `${Math.round(v * 100)}%`;
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c]));
 const GIFT_TAX_URL = "https://takatrp.github.io/gift-tax/";
+const VERSION = "Rev.17";
 const tabFlow = [
   ["summary", "概要"],
   ["family", "家族構成"],
@@ -171,7 +172,7 @@ function applyRate(amount, rates) {
   return Math.max(0, Math.floor(taxable * row.rate - row.deduction));
 }
 
-function getHeirInfo(input = state) {
+export function getHeirInfo(input = state) {
   const spouse = input.hasSpouse === "yes" ? 1 : 0;
   const naturalChildren = Math.max(0, Math.floor(num(input.childrenCount)));
   const adopted = Math.max(0, Math.floor(num(input.adoptedCount)));
@@ -256,7 +257,7 @@ function calcGiftAddBack(input = state) {
   };
 }
 
-function calcEstate(input = state) {
+export function calcEstate(input = state) {
   const heirs = getHeirInfo(input);
   const insuranceExemption = Math.min(num(input.lifeInsuranceHeirs), 5000000 * heirs.heirsForTax);
   const taxableInsurance = Math.max(0, num(input.lifeInsurance) - insuranceExemption);
@@ -342,7 +343,7 @@ function calcSpouseScenario(spouseShare) {
   };
 }
 
-function calcGift(input = state) {
+export function calcGift(input = state) {
   const annualTaxable = Math.max(0, num(input.annualGiftPerPerson) - 1100000);
   const annualGiftTaxPerPerson = applyRate(annualTaxable, TaxRules.giftTaxRates[input.giftRateType] || TaxRules.giftTaxRates.special);
   const totalAnnualGift = num(input.annualGiftPerPerson) * num(input.annualGiftRecipients) * num(input.annualGiftYears);
@@ -493,7 +494,8 @@ function diagnoseRisks(input = state) {
 function getUnreflectedItems(input = state) {
   const items = [
     "実行判断・申告計算では、土地評価、評価単位、路線価補正、貸家建付地等を個別確認",
-    "遺産分割、遺留分、名義預金、過去贈与の証拠関係は本ツール外で確認"
+    "遺産分割、遺留分、名義預金、過去贈与の証拠関係は本ツール外で確認",
+    "死亡退職金の非課税枠は未入力のため、支給規程・支給見込がある場合は別途確認"
   ];
   if (num(input.homeProperty) || num(input.rentalProperty)) items.unshift("小規模宅地等の特例は未反映");
   if (num(input.businessAssets)) items.unshift("非上場株式・事業用資産評価、事業承継税制は未反映");
@@ -1149,12 +1151,16 @@ function renderSources() {
   if (!wrap) return;
   wrap.innerHTML = "";
   Object.entries(TaxRules.sources).forEach(([key, s]) => {
+    const legalLinks = (s.legalRefs || [])
+      .map((ref) => `<a href="${esc(ref.url)}" target="_blank" rel="noopener">${esc(ref.title)}</a>`)
+      .join(" / ");
     const div = document.createElement("article");
     div.className = "source-item";
     div.innerHTML = `
       <h3>${s.title}</h3>
       <p>${s.summary}</p>
       <p>使用箇所：${(s.usage || []).join("、")}</p>
+      ${legalLinks ? `<p>法令根拠：${legalLinks}</p>` : ""}
       ${s.url ? `<a href="${s.url}" target="_blank" rel="noopener">根拠ページを開く</a>` : `<span>運用上の注意</span>`}
       <div><button type="button" class="source-btn" data-source="${key}">詳細</button></div>
     `;
@@ -1252,12 +1258,16 @@ function renderSummary() {
 
 function openSource(key) {
   const s = TaxRules.sources[key] || TaxRules.sources.tool_disclaimer;
+  const legalLinks = (s.legalRefs || [])
+    .map((ref) => `<a href="${esc(ref.url)}" target="_blank" rel="noopener">${esc(ref.title)}</a>`)
+    .join(" / ");
   document.getElementById("sourceTitle").textContent = s.title;
   document.getElementById("sourceBody").innerHTML = `
     <p>${s.summary}</p>
     <div class="source-meta">
       ${s.formula ? `<div><strong>計算式：</strong>${s.formula}</div>` : ""}
       <div><strong>根拠：</strong>${s.sourceTitle || "運用上の注意"}</div>
+      ${legalLinks ? `<div><strong>法令根拠：</strong>${legalLinks}</div>` : ""}
       <div><strong>確認日：</strong>${s.lastChecked}</div>
       <div><strong>使用箇所：</strong>${(s.usage || []).join("、")}</div>
     </div>
@@ -1291,83 +1301,102 @@ function formatMoneyInput(el) {
   el.value = n ? n.toLocaleString("ja-JP") : "";
 }
 
-document.addEventListener("input", (e) => {
-  if (e.target.matches("[data-money]")) formatMoneyInput(e.target);
-  if (e.target.matches("[data-field], [data-action-field]")) {
-    collectStateFromInputs();
-    render();
+function syncFooterMeta() {
+  const yearEl = document.getElementById("cpy-year");
+  const dateEl = document.getElementById("last-updated-date");
+  const revEl = document.getElementById("build-rev");
+  if (yearEl) yearEl.textContent = String(new Date().getFullYear());
+  if (dateEl) {
+    const d = new Date(document.lastModified);
+    const yyyy = String(d.getFullYear());
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    dateEl.textContent = `${yyyy}-${mm}-${dd}`;
   }
-});
+  if (revEl) revEl.textContent = VERSION;
+}
 
-document.addEventListener("change", (e) => {
-  if (e.target.matches("[data-field], [data-action-field]")) {
-    collectStateFromInputs();
-    render();
-  }
-});
+if (typeof document !== "undefined") {
+  syncFooterMeta();
 
-document.addEventListener("click", (e) => {
-  const stepTarget = e.target.closest("[data-step-target]");
-  if (stepTarget) {
-    switchTab(stepTarget.dataset.stepTarget);
-    return;
-  }
-  const recommendedAction = e.target.closest("[data-recommend-action]");
-  if (recommendedAction) {
-    state[recommendedAction.dataset.recommendAction] = true;
-    render();
-    return;
-  }
-  const tab = e.target.closest(".tab");
-  if (tab) {
-    switchTab(tab.dataset.tab);
-  }
-  const src = e.target.closest("[data-source]");
-  if (src && !src.classList.contains("tab")) openSource(src.dataset.source);
-});
-
-document.getElementById("closeSource").addEventListener("click", () => document.getElementById("sourceDialog").close());
-document.getElementById("saveBtn").addEventListener("click", () => {
-  collectStateFromInputs();
-  localStorage.setItem("shisan-shokei-navi", JSON.stringify(state));
-  alert("ブラウザに一時保存しました。");
-});
-document.getElementById("loadBtn").addEventListener("click", () => {
-  const saved = localStorage.getItem("shisan-shokei-navi");
-  if (!saved) return alert("保存データがありません。");
-  state = normalizeState(JSON.parse(saved));
-  render();
-});
-document.getElementById("clearSaveBtn").addEventListener("click", () => {
-  if (!confirm("このブラウザ内の一時保存データを削除します。よろしいですか？")) return;
-  localStorage.removeItem("shisan-shokei-navi");
-  alert("一時保存データを削除しました。");
-});
-document.getElementById("exportBtn").addEventListener("click", () => {
-  collectStateFromInputs();
-  const blob = new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), state }, null, 2)], { type: "application/json" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = `資産承継面談_${state.caseName || "案件"}_${new Date().toISOString().slice(0, 10)}.json`;
-  a.click();
-  URL.revokeObjectURL(a.href);
-});
-document.querySelectorAll(".print-action").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    collectStateFromInputs();
-    render();
-    const warnings = getReportWarnings(state);
-    if (warnings.length && !confirm(`印刷前の確認項目があります。\n\n${warnings.join("\n")}\n\nこのまま印刷しますか？`)) return;
-    window.print();
+  document.addEventListener("input", (e) => {
+    if (e.target.matches("[data-money]")) formatMoneyInput(e.target);
+    if (e.target.matches("[data-field], [data-action-field]")) {
+      collectStateFromInputs();
+      render();
+    }
   });
-});
-document.getElementById("importFile").addEventListener("change", async (e) => {
-  const file = e.target.files?.[0];
-  if (!file) return;
-  const text = await file.text();
-  const parsed = JSON.parse(text);
-  state = normalizeState(parsed.state || parsed);
-  render();
-});
 
-render();
+  document.addEventListener("change", (e) => {
+    if (e.target.matches("[data-field], [data-action-field]")) {
+      collectStateFromInputs();
+      render();
+    }
+  });
+
+  document.addEventListener("click", (e) => {
+    const stepTarget = e.target.closest("[data-step-target]");
+    if (stepTarget) {
+      switchTab(stepTarget.dataset.stepTarget);
+      return;
+    }
+    const recommendedAction = e.target.closest("[data-recommend-action]");
+    if (recommendedAction) {
+      state[recommendedAction.dataset.recommendAction] = true;
+      render();
+      return;
+    }
+    const tab = e.target.closest(".tab");
+    if (tab) {
+      switchTab(tab.dataset.tab);
+    }
+    const src = e.target.closest("[data-source]");
+    if (src && !src.classList.contains("tab")) openSource(src.dataset.source);
+  });
+
+  document.getElementById("closeSource").addEventListener("click", () => document.getElementById("sourceDialog").close());
+  document.getElementById("saveBtn").addEventListener("click", () => {
+    collectStateFromInputs();
+    localStorage.setItem("shisan-shokei-navi", JSON.stringify(state));
+    alert("ブラウザに一時保存しました。");
+  });
+  document.getElementById("loadBtn").addEventListener("click", () => {
+    const saved = localStorage.getItem("shisan-shokei-navi");
+    if (!saved) return alert("保存データがありません。");
+    state = normalizeState(JSON.parse(saved));
+    render();
+  });
+  document.getElementById("clearSaveBtn").addEventListener("click", () => {
+    if (!confirm("このブラウザ内の一時保存データを削除します。よろしいですか？")) return;
+    localStorage.removeItem("shisan-shokei-navi");
+    alert("一時保存データを削除しました。");
+  });
+  document.getElementById("exportBtn").addEventListener("click", () => {
+    collectStateFromInputs();
+    const blob = new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), state }, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `資産承継面談_${state.caseName || "案件"}_${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+  document.querySelectorAll(".print-action").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      collectStateFromInputs();
+      render();
+      const warnings = getReportWarnings(state);
+      if (warnings.length && !confirm(`印刷前の確認項目があります。\n\n${warnings.join("\n")}\n\nこのまま印刷しますか？`)) return;
+      window.print();
+    });
+  });
+  document.getElementById("importFile").addEventListener("change", async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const text = await file.text();
+    const parsed = JSON.parse(text);
+    state = normalizeState(parsed.state || parsed);
+    render();
+  });
+
+  render();
+}
