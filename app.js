@@ -106,7 +106,7 @@ const comma = (v) => {
 const pct = (v) => `${Math.round(v * 100)}%`;
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c]));
 const GIFT_TAX_URL = "https://takatrp.github.io/gift-tax/";
-const VERSION = "Rev.18";
+const VERSION = "Rev.19";
 const CHART_COLORS = ["#578899", "#6b8f71", "#b7791f", "#7c6f99", "#9a6b5b", "#4f7c8c", "#8a7f5a"];
 const tabFlow = [
   ["summary", "概要"],
@@ -403,9 +403,12 @@ function inheritanceTaxBreakdownLines(e) {
 function getCalculationBreakdowns(input = state) {
   const e = calcEstate(input);
   const g = calcGift(input);
+  const effect = calcActionEffect();
   const giftRateRows = TaxRules.giftTaxRates[input.giftRateType] || TaxRules.giftTaxRates.special;
   const annualTaxable = Math.max(0, num(input.annualGiftPerPerson) - 1100000);
-  const cashShortage = Math.max(0, e.inheritanceTaxTotal - (num(input.cash) - num(input.cashReserveTarget)));
+  const cashAvailable = num(input.cash) - num(input.cashReserveTarget);
+  const cashShortage = Math.max(0, e.inheritanceTaxTotal - cashAvailable);
+  const cashSurplus = Math.max(0, cashAvailable - e.inheritanceTaxTotal);
   return {
     heirsForTax: {
       title: "法定相続人の数（税額計算用）",
@@ -450,6 +453,16 @@ function getCalculationBreakdowns(input = state) {
       title: "相続税総額 概算",
       note: "配偶者の税額軽減などの税額控除前の概算です。",
       lines: inheritanceTaxBreakdownLines(e)
+    },
+    actionAfterInheritanceTax: {
+      title: "打ち手後の相続税総額 概算",
+      note: "選択済みの打ち手を反映した後の概算です。贈与税コスト等は別途確認します。",
+      lines: [
+        `現状の相続税総額概算：${yen(effect.before.inheritanceTaxTotal)}`,
+        `打ち手後の課税遺産総額：${yen(effect.after.taxableEstate)}`,
+        ...inheritanceTaxBreakdownLines(effect.after),
+        `現状との差額：${yen(effect.before.inheritanceTaxTotal - effect.after.inheritanceTaxTotal)}`
+      ]
     },
     insuranceExemption: {
       title: "死亡保険金非課税枠",
@@ -515,8 +528,19 @@ function getCalculationBreakdowns(input = state) {
     cashShortage: {
       title: "納税資金不足目安",
       lines: [
-        `使える現預金目安：現預金 ${yen(input.cash)} - 生活費・予備資金 ${yen(input.cashReserveTarget)} = ${yen(num(input.cash) - num(input.cashReserveTarget))}`,
+        `使える現預金目安：現預金 ${yen(input.cash)} - 生活費・予備資金 ${yen(input.cashReserveTarget)} = ${yen(cashAvailable)}`,
         `相続税総額概算 ${yen(e.inheritanceTaxTotal)} - 使える現預金目安 = ${yen(cashShortage)}`
+      ]
+    },
+    taxFunding: {
+      title: "納税資金",
+      note: cashShortage > 0 ? "現預金だけでは不足する目安です。" : "生活費・予備資金を除いた後でも、概算相続税を賄える目安です。",
+      lines: [
+        `使える現預金目安：現預金 ${yen(input.cash)} - 生活費・予備資金 ${yen(input.cashReserveTarget)} = ${yen(cashAvailable)}`,
+        `相続税総額概算：${yen(e.inheritanceTaxTotal)}`,
+        cashShortage > 0
+          ? `不足額：${yen(e.inheritanceTaxTotal)} - ${yen(cashAvailable)} = ${yen(cashShortage)}`
+          : `余裕額：${yen(cashAvailable)} - ${yen(e.inheritanceTaxTotal)} = ${yen(cashSurplus)}`
       ]
     },
     cash: {
@@ -1436,12 +1460,17 @@ function renderSummary() {
   const e = calcEstate(state);
   const r = diagnoseRisks(state);
   const effect = calcActionEffect();
+  const cashAvailable = num(state.cash) - num(state.cashReserveTarget);
+  const cashShortage = Math.max(0, e.inheritanceTaxTotal - cashAvailable);
+  const cashSurplus = Math.max(0, cashAvailable - e.inheritanceTaxTotal);
+  const taxFundingLabel = cashShortage > 0 ? `不足 ${yen(cashShortage)}` : `余裕 ${yen(cashSurplus)}`;
   document.getElementById("liveSummary").innerHTML = `
-    <div class="mini"><span>正味財産</span><b>${yen(e.netEstate)}</b></div>
-    <div class="mini"><span>基礎控除</span><b>${yen(e.heirs.basicDeduction)}</b></div>
-    <div class="mini"><span>相続税総額概算</span><b>${yen(e.inheritanceTaxTotal)}</b></div>
-    <div class="mini"><span>打ち手後概算</span><b>${yen(effect.after.inheritanceTaxTotal)}</b></div>
-    <div class="mini"><span>法定相続人</span><b>${e.heirs.heirsForTax}人</b></div>
+    <div class="mini"><span>正味財産</span><b>${calcValueHtml(yen(e.netEstate), "netEstate")}</b></div>
+    <div class="mini"><span>基礎控除</span><b>${calcValueHtml(yen(e.heirs.basicDeduction), "basicDeduction")}</b></div>
+    <div class="mini"><span>相続税総額概算</span><b>${calcValueHtml(yen(e.inheritanceTaxTotal), "inheritanceTaxTotal")}</b></div>
+    <div class="mini"><span>納税資金</span><b>${calcValueHtml(taxFundingLabel, "taxFunding")}</b></div>
+    <div class="mini"><span>打ち手後概算</span><b>${calcValueHtml(yen(effect.after.inheritanceTaxTotal), "actionAfterInheritanceTax")}</b></div>
+    <div class="mini"><span>法定相続人</span><b>${calcValueHtml(`${e.heirs.heirsForTax}人`, "heirsForTax")}</b></div>
     <div class="mini"><span>主なリスク</span><b>税:${r.taxRisk} / 資金:${r.cashRisk} / 分割:${r.splitRisk}</b></div>
   `;
 }
