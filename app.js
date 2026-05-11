@@ -106,7 +106,7 @@ const comma = (v) => {
 const pct = (v) => `${Math.round(v * 100)}%`;
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c]));
 const GIFT_TAX_URL = "https://takatrp.github.io/gift-tax/";
-const VERSION = "Rev.19";
+const VERSION = "Rev.20";
 const CHART_COLORS = ["#578899", "#6b8f71", "#b7791f", "#7c6f99", "#9a6b5b", "#4f7c8c", "#8a7f5a"];
 const tabFlow = [
   ["summary", "概要"],
@@ -341,6 +341,7 @@ function calcSpouseScenario(spouseShare) {
     spouseShare,
     firstTax: Math.floor(firstTax),
     spouseAcquisition: Math.floor(spouseAcquisition),
+    secondEstate: Math.floor(secondEstate),
     secondTax: Math.floor(second.inheritanceTaxTotal),
     totalTax: Math.floor(firstTax + second.inheritanceTaxTotal),
     comment: spouseShare === 1 ? "一次は軽く見えやすいが二次相続が重くなりやすい" :
@@ -547,6 +548,37 @@ function getCalculationBreakdowns(input = state) {
       title: "現預金",
       lines: [`入力値：${yen(input.cash)}`]
     }
+  };
+}
+
+function spouseScenarioBreakdown(key) {
+  const match = /^spouseScenario:(.+)$/.exec(key || "");
+  if (!match) return null;
+  const spouseShare = Number(match[1]);
+  if (!Number.isFinite(spouseShare)) return null;
+  const e = calcEstate(state);
+  const scenario = calcSpouseScenario(spouseShare);
+  if (!scenario) {
+    return {
+      title: "一次・二次相続の合計",
+      note: "配偶者がいない前提のため、配偶者取得割合別の二次相続比較は対象外です。",
+      lines: ["配偶者なし"]
+    };
+  }
+  const spouseStatutoryShare = e.heirs.shares.find((s) => s.label === "配偶者")?.share || 0;
+  const spouseReliefLimit = Math.max(160000000, e.netEstate * spouseStatutoryShare);
+  return {
+    title: `一次・二次相続の合計（配偶者 ${pct(spouseShare)}取得）`,
+    note: "一次相続では配偶者の税額軽減を概算反映し、二次相続では配偶者固有財産と一次取得額から生活費消費見込を控除した財産で再計算します。",
+    lines: [
+      `一次相続の正味財産：${yen(e.netEstate)}`,
+      `配偶者取得額：${yen(e.netEstate)} × ${pct(spouseShare)} = ${yen(scenario.spouseAcquisition)}`,
+      `配偶者の税額軽減上限：max(1億6,000万円, 正味財産 ${yen(e.netEstate)} × 法定相続分 ${pct(spouseStatutoryShare)}) = ${yen(spouseReliefLimit)}`,
+      `一次相続税概算：${yen(scenario.firstTax)}`,
+      `二次相続財産：配偶者固有財産 ${yen(state.spouseOwnAssets)} + 配偶者取得額 ${yen(scenario.spouseAcquisition)} - 生活費消費見込 ${yen(state.spouseFutureConsumption)} = ${yen(scenario.secondEstate)}`,
+      `二次相続税概算：${yen(scenario.secondTax)}`,
+      `一次・二次合計：${yen(scenario.firstTax)} + ${yen(scenario.secondTax)} = ${yen(scenario.totalTax)}`
+    ]
   };
 }
 
@@ -1068,7 +1100,7 @@ function renderDiagnosisCharts(e, risks) {
   const spouseRows = state.hasSpouse === "yes"
     ? [0, 0.25, 0.5, 0.75, 1].map((r) => {
         const s = calcSpouseScenario(r);
-        return { label: `配偶者 ${pct(r)}取得`, value: s.totalTax, note: `一次 ${yen(s.firstTax)} / 二次 ${yen(s.secondTax)}` };
+        return { label: `配偶者 ${pct(r)}取得`, value: s.totalTax, note: `一次 ${yen(s.firstTax)} / 二次 ${yen(s.secondTax)}`, breakdown: `spouseScenario:${r}` };
       })
     : [{ label: "配偶者取得割合比較", value: 0, note: "配偶者なしのため対象外" }];
   renderChart("spouseScenarioChart", "一次・二次相続の合計", "配偶者取得割合ごとの合計税額を横並びで比較します。", spouseRows);
@@ -1501,7 +1533,7 @@ function openSource(key) {
 }
 
 function openCalculationBreakdown(key) {
-  const item = getCalculationBreakdowns(state)[key];
+  const item = spouseScenarioBreakdown(key) || getCalculationBreakdowns(state)[key];
   if (!item) return;
   document.getElementById("calcTitle").textContent = item.title;
   document.getElementById("calcBody").innerHTML = `

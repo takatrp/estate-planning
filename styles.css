@@ -41,6 +41,30 @@ h1{font-size:clamp(1.15rem,1.9vw,1.55rem);line-height:1.25;margin:0}
   border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--muted);padding:7px 11px;font-weight:700;font-size:.92rem
 }
 .tab.active{background:var(--brand);color:#fff;border-color:var(--brand)}
+.tab.result-tab{
+  display:inline-flex;
+  align-items:center;
+  gap:7px;
+  border-color:#f5a623;
+  color:#7a4b00;
+  background:#fffaf0;
+  box-shadow:0 0 0 2px rgba(245,166,35,.12)
+}
+.tab.result-tab small{
+  font-size:.68rem;
+  line-height:1;
+  padding:3px 6px;
+  border-radius:999px;
+  background:#f5a623;
+  color:#fff;
+}
+.tab.result-tab.active{
+  background:#f5a623;
+  border-color:#d97706;
+  color:#fff;
+  box-shadow:0 6px 16px rgba(217,119,6,.22)
+}
+.tab.result-tab.active small{background:#fff;color:#9a5b00}
 .workspace{min-width:0}
 .panel,.side-panel{
   background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px;box-shadow:var(--shadow)
@@ -58,6 +82,14 @@ h1{font-size:clamp(1.15rem,1.9vw,1.55rem);line-height:1.25;margin:0}
 }
 .input-group h3{
   margin:0;padding:7px 10px;background:#f1f6f8;color:#334155;font-size:.9rem;border-bottom:1px solid var(--line)
+}
+.group-note{
+  margin:0;
+  padding:8px 10px;
+  color:var(--muted);
+  font-size:.86rem;
+  background:#fbfdfe;
+  border-bottom:1px solid var(--line)
 }
 .input-group .grid{margin:0;border:0;border-radius:0}
 label{display:block;font-weight:700;color:#263445}
