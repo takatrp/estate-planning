@@ -1682,10 +1682,83 @@ function getTpsMappingRows(input = state) {
   ];
 }
 
+function getTpsStatusCounts(rows) {
+  return rows.reduce((acc, row) => {
+    acc[row.status] = (acc[row.status] || 0) + 1;
+    return acc;
+  }, {});
+}
+
+function getTpsWorkflowSteps(input = state) {
+  const e = calcEstate(input);
+  const g = calcGift(input);
+  return [
+    {
+      no: "1",
+      title: "財産所有者",
+      action: "氏名と生年月日を先に確定",
+      basis: input.caseName ? `候補：${input.caseName}` : "氏名未入力",
+      note: "生年月日は本ツール外で確認"
+    },
+    {
+      no: "2",
+      title: "家族構成",
+      action: "人数集計を個人別行へ展開",
+      basis: `法定相続人 ${e.heirs.heirsForTax}人 / 養子算入 ${e.heirs.adoptedForTax}人`,
+      note: "氏名・続柄・生年月日・養子区分が必要"
+    },
+    {
+      no: "3",
+      title: "所有財産",
+      action: "資産区分ごとに明細化して入力",
+      basis: `正味財産概算 ${yen(e.netEstate)}`,
+      note: "土地建物・有価証券・自社株は明細資料へ分解"
+    },
+    {
+      no: "4",
+      title: "生命保険金等・退職手当金等",
+      action: "受取人別に入力",
+      basis: `保険総額 ${yen(input.lifeInsurance)} / 非課税枠 ${yen(e.insuranceExemption)}`,
+      note: "退職手当金は別途確認"
+    },
+    {
+      no: "5",
+      title: "債務等",
+      action: "債務と葬式費用を分けて入力",
+      basis: `債務 ${yen(input.debts)} / 葬式費用 ${yen(input.funeralCosts)}`,
+      note: "借入先・種類別の内訳が必要"
+    },
+    {
+      no: "6",
+      title: "相続時精算課税適用財産",
+      action: "年110万円控除後の額を確認",
+      basis: `控除後 ${yen(g.settlementBase)} / 特別控除残 ${yen(g.remainingSpecial)}`,
+      note: "過去分と予定分を混ぜない"
+    },
+    {
+      no: "7",
+      title: "小規模宅地等",
+      action: "対象宅地・取得者・面積をTPS側で判定",
+      basis: `同居 ${yesNo(input.coResident)} / 自宅承継 ${yesNo(input.homePlanChild)}`,
+      note: "本ツールの税額には未反映"
+    },
+    {
+      no: "8",
+      title: "現状試算",
+      action: "TPS明細入力後の税額と照合",
+      basis: `相続税概算 ${yen(e.inheritanceTaxTotal)}`,
+      note: "差が出たら評価・保険・債務・贈与加算を確認"
+    }
+  ];
+}
+
 function renderTpsMapping() {
   const wrap = document.getElementById("tpsMappingView");
   if (!wrap) return;
   const rows = getTpsMappingRows(state);
+  const counts = getTpsStatusCounts(rows);
+  const workflow = getTpsWorkflowSteps(state);
+  const directRows = rows.filter((row) => row.status === "転記" || row.status === "照合");
   wrap.innerHTML = `
     <section class="report-block tps-cover">
       <h3>転記対象案件</h3>
@@ -1694,6 +1767,51 @@ function renderTpsMapping() {
         <div><span>面談日</span><b>${esc(state.meetingDate || "未入力")}</b></div>
         <div><span>担当</span><b>${esc(state.staffName || "未入力")}</b></div>
         <div><span>作成</span><b>${esc(VERSION)}</b></div>
+      </div>
+    </section>
+    <section class="report-block">
+      <h3>TPS8200転記の実務サマリー</h3>
+      <div class="tps-readiness-grid">
+        <div><span>そのまま転記</span><b>${counts["転記"] || 0}件</b><small>現預金・葬式費用など</small></div>
+        <div><span>明細化が必要</span><b>${counts["要内訳"] || 0}件</b><small>家族別・財産別に分解</small></div>
+        <div><span>別途確認</span><b>${counts["別途確認"] || 0}件</b><small>生年月日・退職金・特例判定</small></div>
+        <div><span>TPS側で照合</span><b>${counts["照合"] || 0}件</b><small>相続人・税額・精算課税</small></div>
+      </div>
+      <p class="tps-operator-note">この表はインポート用データではなく、TPS8200へ手入力する順番と検算ポイントをそろえるための作業表です。</p>
+    </section>
+    <section class="report-block">
+      <h3>TPS8200入力順チェック</h3>
+      <div class="tps-workflow-list">
+        ${workflow.map((step) => `
+          <div class="tps-workflow-item">
+            <b>${esc(step.no)}</b>
+            <div>
+              <strong>${esc(step.title)}</strong>
+              <p>${esc(step.action)}</p>
+              <small>${esc(step.basis)} / ${esc(step.note)}</small>
+            </div>
+          </div>
+        `).join("")}
+      </div>
+    </section>
+    <section class="report-block">
+      <h3>先に転記・照合できる数字</h3>
+      <div class="table-wrap">
+        <table class="tps-quick-table">
+          <thead>
+            <tr><th>TPS8200の入力先</th><th>値</th><th>扱い</th><th>注意</th></tr>
+          </thead>
+          <tbody>
+            ${directRows.map((row) => `
+              <tr>
+                <td>${esc(row.tps)}</td>
+                <td class="tps-value">${esc(row.value)}</td>
+                <td><span class="tps-status ${tpsStatusClass(row.status)}">${esc(row.status)}</span></td>
+                <td>${esc(row.note)}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
       </div>
     </section>
     <section class="report-block">
@@ -1708,6 +1826,7 @@ function renderTpsMapping() {
               <th>転記・確認する値</th>
               <th>扱い</th>
               <th>確認メモ</th>
+              <th>入力確認</th>
             </tr>
           </thead>
           <tbody>
@@ -1719,6 +1838,7 @@ function renderTpsMapping() {
                 <td class="tps-value">${esc(row.value)}</td>
                 <td><span class="tps-status ${tpsStatusClass(row.status)}">${esc(row.status)}</span></td>
                 <td>${esc(row.note)}</td>
+                <td class="tps-print-check">□</td>
               </tr>
             `).join("")}
           </tbody>
