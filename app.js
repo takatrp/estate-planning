@@ -552,6 +552,175 @@ function getCalculationBreakdowns(input = state) {
   };
 }
 
+function actionCashShortageDetails(effect = calcActionEffect()) {
+  const beforeAvailable = num(state.cash) - num(state.cashReserveTarget);
+  const afterAvailable = num(effect.afterInput.cash) - num(effect.afterInput.cashReserveTarget);
+  return {
+    beforeAvailable,
+    afterAvailable,
+    beforeShortage: Math.max(0, effect.before.inheritanceTaxTotal - beforeAvailable),
+    afterShortage: Math.max(0, effect.after.inheritanceTaxTotal - afterAvailable)
+  };
+}
+
+function estateCompositionLines(input, estate, prefix) {
+  return [
+    `${prefix}の財産：現預金 ${yen(input.cash)} + 上場株式・投信等 ${yen(input.securities)} + 自宅土地建物 ${yen(input.homeProperty)}`,
+    `貸付不動産 ${yen(input.rentalProperty)} + 非上場株式・事業用資産 ${yen(input.businessAssets)} + その他財産 ${yen(input.otherAssets)}`,
+    `課税対象保険金 ${yen(estate.taxableInsurance)} + 生前贈与加算 ${yen(estate.priorGiftAddBack)} = 課税対象財産 ${yen(estate.grossAssets)}`,
+    `債務 ${yen(input.debts)} + 葬式費用 ${yen(input.funeralCosts)} = 控除 ${yen(estate.deductions)}`
+  ];
+}
+
+function actionEffectBreakdown(key) {
+  const match = /^actionEffect:(before|after):([a-zA-Z]+)$/.exec(key || "");
+  if (!match) return null;
+  const [, side, metric] = match;
+  const effect = calcActionEffect();
+  const cash = actionCashShortageDetails(effect);
+  const beforeInput = normalizeState({ ...state });
+  const afterInput = effect.afterInput;
+  const isAfter = side === "after";
+  const current = isAfter ? effect.after : effect.before;
+  const currentInput = isAfter ? afterInput : beforeInput;
+  const sideLabel = isAfter ? "対策後" : "現状";
+  const titles = {
+    netEstate: "正味財産",
+    taxableEstate: "課税遺産総額",
+    inheritanceTaxTotal: "相続税総額概算",
+    cashShortage: "納税資金不足目安",
+    insuranceExemption: "死亡保険金非課税利用額",
+    giftTaxCost: "贈与税等概算コスト"
+  };
+  const title = titles[metric];
+  if (!title) return null;
+
+  if (metric === "netEstate") {
+    return {
+      title: `${sideLabel}の${title}`,
+      note: isAfter ? "選択済みの打ち手を反映した後の正味財産です。" : "入力中の現状値による正味財産です。",
+      lines: [
+        ...estateCompositionLines(currentInput, current, sideLabel),
+        `正味財産：課税対象財産 ${yen(current.grossAssets)} - 控除 ${yen(current.deductions)} = ${yen(current.netEstate)}`
+      ]
+    };
+  }
+
+  if (metric === "taxableEstate") {
+    return {
+      title: `${sideLabel}の${title}`,
+      lines: [
+        `正味財産 ${yen(current.netEstate)} - 基礎控除 ${yen(current.heirs.basicDeduction)} = ${yen(current.taxableEstate)}`,
+        `法定相続人：${current.heirs.heirsForTax}人（養子の税法算入 ${current.heirs.adoptedForTax}人）`
+      ]
+    };
+  }
+
+  if (metric === "inheritanceTaxTotal") {
+    return {
+      title: `${sideLabel}の${title}`,
+      note: "配偶者の税額軽減などの税額控除前の概算です。",
+      lines: inheritanceTaxBreakdownLines(current)
+    };
+  }
+
+  if (metric === "cashShortage") {
+    const available = isAfter ? cash.afterAvailable : cash.beforeAvailable;
+    const shortage = isAfter ? cash.afterShortage : cash.beforeShortage;
+    return {
+      title: `${sideLabel}の${title}`,
+      note: "現預金から生活費・予備資金として残したい現金を控除した後、相続税概算に不足する額です。",
+      lines: [
+        `使える現預金目安：現預金 ${yen(currentInput.cash)} - 生活費・予備資金 ${yen(currentInput.cashReserveTarget)} = ${yen(available)}`,
+        `納税資金不足目安：相続税総額概算 ${yen(current.inheritanceTaxTotal)} - 使える現預金目安 ${yen(available)} = ${yen(shortage)}`
+      ]
+    };
+  }
+
+  if (metric === "insuranceExemption") {
+    return {
+      title: `${sideLabel}の${title}`,
+      lines: [
+        `法定上限：500万円 × 法定相続人 ${current.heirs.heirsForTax}人 = ${yen(5000000 * current.heirs.heirsForTax)}`,
+        `相続人が受け取る死亡保険金：${yen(currentInput.lifeInsuranceHeirs)}`,
+        `非課税利用額：min(${yen(currentInput.lifeInsuranceHeirs)}, ${yen(5000000 * current.heirs.heirsForTax)}) = ${yen(current.insuranceExemption)}`
+      ]
+    };
+  }
+
+  if (metric === "giftTaxCost") {
+    const cost = isAfter ? effect.giftTaxCost : 0;
+    return {
+      title: `${sideLabel}の贈与税等概算コスト`,
+      note: "打ち手比較で概算反映している贈与税等の合計です。実行時は贈与者・受贈者・年分ごとに確認してください。",
+      lines: [
+        `概算コスト：${yen(cost)}`,
+        isAfter && effect.notes.length ? `反映メモ：${effect.notes.join(" ")}` : "現状または打ち手未選択では、概算コストは0円です。"
+      ]
+    };
+  }
+
+  return null;
+}
+
+function actionDiffBreakdown(key) {
+  const match = /^actionDiff:([a-zA-Z]+)$/.exec(key || "");
+  if (!match) return null;
+  const metric = match[1];
+  const effect = calcActionEffect();
+  const cash = actionCashShortageDetails(effect);
+  const metrics = {
+    netEstate: {
+      title: "正味財産の差額",
+      before: effect.before.netEstate,
+      after: effect.after.netEstate,
+      label: "現状の正味財産 - 対策後の正味財産"
+    },
+    taxableEstate: {
+      title: "課税遺産総額の差額",
+      before: effect.before.taxableEstate,
+      after: effect.after.taxableEstate,
+      label: "現状の課税遺産総額 - 対策後の課税遺産総額"
+    },
+    inheritanceTaxTotal: {
+      title: "相続税総額概算の差額",
+      before: effect.before.inheritanceTaxTotal,
+      after: effect.after.inheritanceTaxTotal,
+      label: "現状の相続税総額概算 - 対策後の相続税総額概算"
+    },
+    cashShortage: {
+      title: "納税資金不足目安の差額",
+      before: cash.beforeShortage,
+      after: cash.afterShortage,
+      label: "現状の不足額 - 対策後の不足額"
+    },
+    insuranceExemption: {
+      title: "死亡保険金非課税利用額の差額",
+      before: effect.before.insuranceExemption,
+      after: effect.after.insuranceExemption,
+      label: "対策後の非課税利用額 - 現状の非課税利用額",
+      reverse: true
+    },
+    giftTaxCost: {
+      title: "贈与税等概算コストの差額",
+      before: 0,
+      after: effect.giftTaxCost,
+      label: "0円 - 贈与税等概算コスト"
+    }
+  };
+  const item = metrics[metric];
+  if (!item) return null;
+  const diff = item.reverse ? item.after - item.before : item.before - item.after;
+  return {
+    title: item.title,
+    lines: [
+      `現状：${yen(item.before)}`,
+      `対策後：${yen(item.after)}`,
+      `${item.label} = ${yen(diff)}`
+    ]
+  };
+}
+
 function spouseScenarioBreakdown(key) {
   const match = /^spouseScenario:(.+)$/.exec(key || "");
   if (!match) return null;
@@ -889,10 +1058,10 @@ function comparisonChartBlock(title, subtitle, rows) {
             <div class="compare-bars">
               <span class="compare-label">現状</span>
               <div class="chart-track">${svgBar(Math.max(before > 0 ? 3 : 0, (before / max) * 100), "#8ca3ad")}</div>
-              <b>${yen(before)}</b>
+              <b>${calcValueHtml(yen(before), row.beforeBreakdown)}</b>
               <span class="compare-label">対策後</span>
               <div class="chart-track">${svgBar(Math.max(after > 0 ? 3 : 0, (after / max) * 100), "#578899")}</div>
-              <b>${yen(after)}</b>
+              <b>${calcValueHtml(yen(after), row.afterBreakdown)}</b>
             </div>
           </div>
         `;
@@ -1206,36 +1375,36 @@ function renderActionComparison() {
   const beforeCashShortage = Math.max(0, effect.before.inheritanceTaxTotal - (num(state.cash) - num(state.cashReserveTarget)));
   const afterCashShortage = Math.max(0, effect.after.inheritanceTaxTotal - (num(effect.afterInput.cash) - num(effect.afterInput.cashReserveTarget)));
   renderComparisonChart("actionEffectChart", "打ち手によるビフォー・アフター", "正味財産、課税遺産、相続税、納税資金不足の変化を棒で確認します。", [
-    { label: "正味財産", before: effect.before.netEstate, after: effect.after.netEstate },
-    { label: "課税遺産総額", before: effect.before.taxableEstate, after: effect.after.taxableEstate },
-    { label: "相続税総額概算", before: effect.before.inheritanceTaxTotal, after: effect.after.inheritanceTaxTotal },
-    { label: "納税資金不足目安", before: beforeCashShortage, after: afterCashShortage }
+    { label: "正味財産", before: effect.before.netEstate, after: effect.after.netEstate, beforeBreakdown: "actionEffect:before:netEstate", afterBreakdown: "actionEffect:after:netEstate" },
+    { label: "課税遺産総額", before: effect.before.taxableEstate, after: effect.after.taxableEstate, beforeBreakdown: "actionEffect:before:taxableEstate", afterBreakdown: "actionEffect:after:taxableEstate" },
+    { label: "相続税総額概算", before: effect.before.inheritanceTaxTotal, after: effect.after.inheritanceTaxTotal, beforeBreakdown: "actionEffect:before:inheritanceTaxTotal", afterBreakdown: "actionEffect:after:inheritanceTaxTotal" },
+    { label: "納税資金不足目安", before: beforeCashShortage, after: afterCashShortage, beforeBreakdown: "actionEffect:before:cashShortage", afterBreakdown: "actionEffect:after:cashShortage" }
   ]);
   const beforeAfter = document.getElementById("beforeAfter");
   if (beforeAfter) {
     beforeAfter.innerHTML = `
-      <article class="ba-card before"><span>現状の相続税概算</span><strong>${yen(effect.before.inheritanceTaxTotal)}</strong><small>課税遺産総額 ${yen(effect.before.taxableEstate)}</small></article>
-      <article class="ba-card after"><span>対策後の相続税概算</span><strong>${yen(effect.after.inheritanceTaxTotal)}</strong><small>課税遺産総額 ${yen(effect.after.taxableEstate)}</small></article>
-      <article class="ba-card impact"><span>相続税の概算効果</span><strong>${diffText(effect.taxReduction)}</strong><small>贈与税等概算コスト ${yen(effect.giftTaxCost)}</small></article>
+      <article class="ba-card before"><span>現状の相続税概算</span><strong>${calcValueHtml(yen(effect.before.inheritanceTaxTotal), "actionEffect:before:inheritanceTaxTotal")}</strong><small>課税遺産総額 ${calcValueHtml(yen(effect.before.taxableEstate), "actionEffect:before:taxableEstate")}</small></article>
+      <article class="ba-card after"><span>対策後の相続税概算</span><strong>${calcValueHtml(yen(effect.after.inheritanceTaxTotal), "actionEffect:after:inheritanceTaxTotal")}</strong><small>課税遺産総額 ${calcValueHtml(yen(effect.after.taxableEstate), "actionEffect:after:taxableEstate")}</small></article>
+      <article class="ba-card impact"><span>相続税の概算効果</span><strong>${calcValueHtml(diffText(effect.taxReduction), "actionDiff:inheritanceTaxTotal")}</strong><small>贈与税等概算コスト ${calcValueHtml(yen(effect.giftTaxCost), "actionEffect:after:giftTaxCost")}</small></article>
     `;
   }
 
   const tbody = document.querySelector("#effectTable tbody");
   if (!tbody) return;
   const rows = [
-    ["正味財産", effect.before.netEstate, effect.after.netEstate, effect.before.netEstate - effect.after.netEstate],
-    ["課税遺産総額", effect.before.taxableEstate, effect.after.taxableEstate, effect.taxableEstateReduction],
-    ["相続税総額概算", effect.before.inheritanceTaxTotal, effect.after.inheritanceTaxTotal, effect.taxReduction],
-    ["納税資金不足目安（生活費等を除く）", beforeCashShortage, afterCashShortage, beforeCashShortage - afterCashShortage],
-    ["死亡保険金非課税利用額", effect.before.insuranceExemption, effect.after.insuranceExemption, effect.after.insuranceExemption - effect.before.insuranceExemption],
-    ["贈与税等概算コスト", 0, effect.giftTaxCost, -effect.giftTaxCost]
+    ["正味財産", effect.before.netEstate, effect.after.netEstate, effect.before.netEstate - effect.after.netEstate, "netEstate"],
+    ["課税遺産総額", effect.before.taxableEstate, effect.after.taxableEstate, effect.taxableEstateReduction, "taxableEstate"],
+    ["相続税総額概算", effect.before.inheritanceTaxTotal, effect.after.inheritanceTaxTotal, effect.taxReduction, "inheritanceTaxTotal"],
+    ["納税資金不足目安（生活費等を除く）", beforeCashShortage, afterCashShortage, beforeCashShortage - afterCashShortage, "cashShortage"],
+    ["死亡保険金非課税利用額", effect.before.insuranceExemption, effect.after.insuranceExemption, effect.after.insuranceExemption - effect.before.insuranceExemption, "insuranceExemption"],
+    ["贈与税等概算コスト", 0, effect.giftTaxCost, -effect.giftTaxCost, "giftTaxCost"]
   ];
-  tbody.innerHTML = rows.map(([label, before, after, diff]) => `
+  tbody.innerHTML = rows.map(([label, before, after, diff, key]) => `
     <tr>
       <td>${label}</td>
-      <td>${yen(before)}</td>
-      <td>${yen(after)}</td>
-      <td class="${diff > 0 ? "positive" : diff < 0 ? "negative" : ""}">${diffText(diff)}</td>
+      <td>${calcValueHtml(yen(before), `actionEffect:before:${key}`)}</td>
+      <td>${calcValueHtml(yen(after), `actionEffect:after:${key}`)}</td>
+      <td class="${diff > 0 ? "positive" : diff < 0 ? "negative" : ""}">${calcValueHtml(diffText(diff), `actionDiff:${key}`)}</td>
     </tr>
   `).join("") + `
     <tr><td colspan="4"><strong>メモ：</strong>${effect.notes.length ? effect.notes.join(" ") : "打ち手が未選択です。候補にチェックを入れると概算効果が表示されます。"}</td></tr>
@@ -1866,12 +2035,30 @@ function renderSummary() {
   const cashShortage = Math.max(0, e.inheritanceTaxTotal - cashAvailable);
   const cashSurplus = Math.max(0, cashAvailable - e.inheritanceTaxTotal);
   const taxFundingLabel = cashShortage > 0 ? `不足 ${yen(cashShortage)}` : `余裕 ${yen(cashSurplus)}`;
+  const taxDiff = effect.before.inheritanceTaxTotal - effect.after.inheritanceTaxTotal;
+  const maxTax = Math.max(effect.before.inheritanceTaxTotal, effect.after.inheritanceTaxTotal, 1);
+  const beforeTaxWidth = Math.max(effect.before.inheritanceTaxTotal > 0 ? 4 : 0, (effect.before.inheritanceTaxTotal / maxTax) * 100);
+  const afterTaxWidth = Math.max(effect.after.inheritanceTaxTotal > 0 ? 4 : 0, (effect.after.inheritanceTaxTotal / maxTax) * 100);
   document.getElementById("liveSummary").innerHTML = `
     <div class="mini"><span>正味財産</span><b>${calcValueHtml(yen(e.netEstate), "netEstate")}</b></div>
     <div class="mini"><span>基礎控除</span><b>${calcValueHtml(yen(e.heirs.basicDeduction), "basicDeduction")}</b></div>
-    <div class="mini"><span>相続税総額概算</span><b>${calcValueHtml(yen(e.inheritanceTaxTotal), "inheritanceTaxTotal")}</b></div>
+    <div class="summary-action-box">
+      <div class="summary-action-head">
+        <span>打ち手比較</span>
+        <b class="${taxDiff > 0 ? "positive" : taxDiff < 0 ? "negative" : ""}">${calcValueHtml(diffText(taxDiff), "actionDiff:inheritanceTaxTotal")}</b>
+      </div>
+      <div class="summary-action-row">
+        <span>現状</span>
+        <div class="summary-action-track">${svgBar(beforeTaxWidth, "#8ca3ad")}</div>
+        <b>${calcValueHtml(yen(effect.before.inheritanceTaxTotal), "actionEffect:before:inheritanceTaxTotal")}</b>
+      </div>
+      <div class="summary-action-row after">
+        <span>対策後</span>
+        <div class="summary-action-track">${svgBar(afterTaxWidth, "#578899")}</div>
+        <b>${calcValueHtml(yen(effect.after.inheritanceTaxTotal), "actionEffect:after:inheritanceTaxTotal")}</b>
+      </div>
+    </div>
     <div class="mini"><span>納税資金</span><b>${calcValueHtml(taxFundingLabel, "taxFunding")}</b></div>
-    <div class="mini"><span>打ち手後概算</span><b>${calcValueHtml(yen(effect.after.inheritanceTaxTotal), "actionAfterInheritanceTax")}</b></div>
     <div class="mini"><span>法定相続人</span><b>${calcValueHtml(`${e.heirs.heirsForTax}人`, "heirsForTax")}</b></div>
     <div class="mini"><span>主なリスク</span><b>税:${r.taxRisk} / 資金:${r.cashRisk} / 分割:${r.splitRisk}</b></div>
   `;
@@ -1903,7 +2090,7 @@ function openSource(key) {
 }
 
 function openCalculationBreakdown(key) {
-  const item = spouseScenarioBreakdown(key) || getCalculationBreakdowns(state)[key];
+  const item = actionEffectBreakdown(key) || actionDiffBreakdown(key) || spouseScenarioBreakdown(key) || getCalculationBreakdowns(state)[key];
   if (!item) return;
   document.getElementById("calcTitle").textContent = item.title;
   document.getElementById("calcBody").innerHTML = `
