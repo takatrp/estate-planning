@@ -530,6 +530,7 @@ function getCalculationBreakdowns(input = state) {
     cashShortage: {
       title: "納税資金不足目安",
       lines: [
+        `現預金目安：入力された現預金 = ${yen(input.cash)}`,
         `使える現預金目安：現預金 ${yen(input.cash)} - 生活費・予備資金 ${yen(input.cashReserveTarget)} = ${yen(cashAvailable)}`,
         `相続税総額概算 ${yen(e.inheritanceTaxTotal)} - 使える現預金目安 = ${yen(cashShortage)}`
       ]
@@ -538,6 +539,7 @@ function getCalculationBreakdowns(input = state) {
       title: "納税資金",
       note: cashShortage > 0 ? "現預金だけでは不足する目安です。" : "生活費・予備資金を除いた後でも、概算相続税を賄える目安です。",
       lines: [
+        `現預金目安：入力された現預金 = ${yen(input.cash)}`,
         `使える現預金目安：現預金 ${yen(input.cash)} - 生活費・予備資金 ${yen(input.cashReserveTarget)} = ${yen(cashAvailable)}`,
         `相続税総額概算：${yen(e.inheritanceTaxTotal)}`,
         cashShortage > 0
@@ -627,10 +629,15 @@ function actionEffectBreakdown(key) {
   if (metric === "cashShortage") {
     const available = isAfter ? cash.afterAvailable : cash.beforeAvailable;
     const shortage = isAfter ? cash.afterShortage : cash.beforeShortage;
+    const cashDelta = num(currentInput.cash) - num(state.cash);
+    const cashBasisLine = isAfter
+      ? `現預金目安：現状現預金 ${yen(state.cash)} + 打ち手による現預金増減 ${yen(cashDelta)} = ${yen(currentInput.cash)}`
+      : `現預金目安：入力された現預金 = ${yen(currentInput.cash)}`;
     return {
       title: `${sideLabel}の${title}`,
       note: "現預金から生活費・予備資金として残したい現金を控除した後、相続税概算に不足する額です。",
       lines: [
+        cashBasisLine,
         `使える現預金目安：現預金 ${yen(currentInput.cash)} - 生活費・予備資金 ${yen(currentInput.cashReserveTarget)} = ${yen(available)}`,
         `納税資金不足目安：相続税総額概算 ${yen(current.inheritanceTaxTotal)} - 使える現預金目安 ${yen(available)} = ${yen(shortage)}`
       ]
@@ -2044,16 +2051,16 @@ function renderSummary() {
     <div class="mini"><span>基礎控除</span><b>${calcValueHtml(yen(e.heirs.basicDeduction), "basicDeduction")}</b></div>
     <div class="summary-action-box">
       <div class="summary-action-head">
-        <span>打ち手比較</span>
+        <span>相続税 打ち手比較</span>
         <b class="${taxDiff > 0 ? "positive" : taxDiff < 0 ? "negative" : ""}">${calcValueHtml(diffText(taxDiff), "actionDiff:inheritanceTaxTotal")}</b>
       </div>
       <div class="summary-action-row">
-        <span>現状</span>
+        <span>現状相続税</span>
         <div class="summary-action-track">${svgBar(beforeTaxWidth, "#8ca3ad")}</div>
         <b>${calcValueHtml(yen(effect.before.inheritanceTaxTotal), "actionEffect:before:inheritanceTaxTotal")}</b>
       </div>
       <div class="summary-action-row after">
-        <span>対策後</span>
+        <span>対策後相続税</span>
         <div class="summary-action-track">${svgBar(afterTaxWidth, "#578899")}</div>
         <b>${calcValueHtml(yen(effect.after.inheritanceTaxTotal), "actionEffect:after:inheritanceTaxTotal")}</b>
       </div>
