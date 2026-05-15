@@ -62,7 +62,14 @@ export const defaults = {
   actionStockReductionEnabled: false,
   actionStockReductionAmount: 0,
   actionCustomReductionEnabled: false,
-  actionCustomReductionAmount: 0
+  actionCustomReductionAmount: 0,
+  divisionPlanName: "生活基盤・承継配慮案",
+  divisionCashSpousePct: 50,
+  divisionSecuritiesSpousePct: 50,
+  divisionHomePropertySpousePct: 100,
+  divisionRentalPropertySpousePct: 0,
+  divisionBusinessAssetsSpousePct: 0,
+  divisionOtherAssetsSpousePct: 50
 };
 
 const moneyFields = new Set([
@@ -74,11 +81,17 @@ const moneyFields = new Set([
   "actionRentalAnnualNetIncome", "actionStockReductionAmount", "actionCustomReductionAmount"
 ]);
 
+const percentFields = new Set([
+  "divisionCashSpousePct", "divisionSecuritiesSpousePct", "divisionHomePropertySpousePct",
+  "divisionRentalPropertySpousePct", "divisionBusinessAssetsSpousePct", "divisionOtherAssetsSpousePct"
+]);
+
 let state = normalizeState({ ...defaults });
 
 export function normalizeState(input) {
   const out = { ...defaults, ...input };
   for (const field of moneyFields) out[field] = toNumber(out[field]);
+  for (const field of percentFields) out[field] = Math.min(100, Math.max(0, toNumber(out[field])));
   ["childrenCount", "adoptedCount", "parentsCount", "siblingsCount", "annualGiftRecipients", "annualGiftYears", "actionAnnualGiftRecipients", "actionAnnualGiftYears", "assumedInheritanceYear"].forEach((field) => {
     out[field] = Math.max(0, Math.floor(toNumber(out[field])));
   });
@@ -108,12 +121,21 @@ const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const GIFT_TAX_URL = "https://takatrp.github.io/gift-tax/";
 const VERSION = "Rev.21";
 const CHART_COLORS = ["#578899", "#6b8f71", "#b7791f", "#7c6f99", "#9a6b5b", "#4f7c8c", "#8a7f5a"];
+const DIVISION_ASSETS = [
+  { key: "cash", pctField: "divisionCashSpousePct", label: "現預金" },
+  { key: "securities", pctField: "divisionSecuritiesSpousePct", label: "上場株式・投信等" },
+  { key: "homeProperty", pctField: "divisionHomePropertySpousePct", label: "自宅土地建物" },
+  { key: "rentalProperty", pctField: "divisionRentalPropertySpousePct", label: "賃貸不動産" },
+  { key: "businessAssets", pctField: "divisionBusinessAssetsSpousePct", label: "非上場株式・事業用資産" },
+  { key: "otherAssets", pctField: "divisionOtherAssetsSpousePct", label: "その他財産" }
+];
 const tabFlow = [
   ["summary", "概要"],
   ["family", "家族構成"],
   ["assets", "資産構成"],
   ["gifts", "贈与・保険"],
   ["diagnosis", "現状診断"],
+  ["division", "分割案"],
   ["actions", "打ち手比較"],
   ["report", "面談レポート"],
   ["tps", "TPS8200転記表"],
@@ -348,6 +370,67 @@ function calcSpouseScenario(spouseShare) {
     comment: spouseShare === 1 ? "一次は軽く見えやすいが二次相続が重くなりやすい" :
       spouseShare === 0 ? "一次で子へ寄せる案。配偶者生活資金に注意" :
       "一次・二次のバランス確認"
+  };
+}
+
+export function calcDivisionPlan(input = state) {
+  const normalized = normalizeState(input);
+  const e = calcEstate(normalized);
+  const hasSpouse = e.heirs.spouse === 1;
+  const rows = DIVISION_ASSETS.map((asset) => {
+    const amount = Math.max(0, num(normalized[asset.key]));
+    const spousePct = hasSpouse ? Math.min(100, Math.max(0, num(normalized[asset.pctField]))) / 100 : 0;
+    const spouseAmount = Math.floor(amount * spousePct);
+    return {
+      ...asset,
+      amount,
+      spousePct,
+      spouseAmount,
+      othersAmount: Math.max(0, amount - spouseAmount)
+    };
+  });
+  const visibleAssets = rows.reduce((sum, row) => sum + row.amount, 0);
+  const spouseVisibleAssets = rows.reduce((sum, row) => sum + row.spouseAmount, 0);
+  const spouseShare = hasSpouse && visibleAssets > 0 ? spouseVisibleAssets / visibleAssets : 0;
+  const spouseAcquisition = Math.floor(e.netEstate * spouseShare);
+  const othersAcquisition = Math.max(0, e.netEstate - spouseAcquisition);
+  const spouseStatutoryShare = e.heirs.shares.find((s) => s.label === "配偶者")?.share || 0;
+  const spouseReliefLimit = hasSpouse ? Math.max(160000000, e.netEstate * spouseStatutoryShare) : 0;
+  const taxBeforeCredit = e.inheritanceTaxTotal;
+  const spouseTaxBefore = Math.floor(taxBeforeCredit * spouseShare);
+  const spouseRelief = hasSpouse && spouseAcquisition > 0
+    ? Math.floor(spouseTaxBefore * Math.min(1, spouseReliefLimit / spouseAcquisition))
+    : 0;
+  const spouseTaxAfter = Math.max(0, spouseTaxBefore - spouseRelief);
+  const othersTax = Math.max(0, taxBeforeCredit - spouseTaxBefore);
+  const payableTax = spouseTaxAfter + othersTax;
+  const spouseCash = rows.find((row) => row.key === "cash")?.spouseAmount || 0;
+  const othersCash = Math.max(0, num(normalized.cash) - spouseCash);
+  const spouseCashShortage = Math.max(0, spouseTaxAfter - spouseCash);
+  const othersCashShortage = Math.max(0, othersTax - othersCash);
+  const cashShortage = spouseCashShortage + othersCashShortage;
+  return {
+    estate: e,
+    hasSpouse,
+    rows,
+    visibleAssets,
+    spouseVisibleAssets,
+    spouseShare,
+    spouseAcquisition,
+    othersAcquisition,
+    spouseStatutoryShare,
+    spouseReliefLimit,
+    taxBeforeCredit,
+    spouseTaxBefore,
+    spouseRelief,
+    spouseTaxAfter,
+    othersTax,
+    payableTax,
+    spouseCash,
+    othersCash,
+    spouseCashShortage,
+    othersCashShortage,
+    cashShortage
   };
 }
 
@@ -755,6 +838,102 @@ function spouseScenarioBreakdown(key) {
       `二次相続財産：配偶者固有財産 ${yen(state.spouseOwnAssets)} + 配偶者取得額 ${yen(scenario.spouseAcquisition)} - 生活費消費見込 ${yen(state.spouseFutureConsumption)} = ${yen(scenario.secondEstate)}`,
       `二次相続税概算：${yen(scenario.secondTax)}`,
       `一次・二次合計：${yen(scenario.firstTax)} + ${yen(scenario.secondTax)} = ${yen(scenario.totalTax)}`
+    ]
+  };
+}
+
+function divisionPlanBreakdown(key) {
+  const match = /^divisionPlan:([a-zA-Z]+)$/.exec(key || "");
+  if (!match) return null;
+  const metric = match[1];
+  const plan = calcDivisionPlan(state);
+  const labels = {
+    spouseAcquisition: "配偶者取得額",
+    othersAcquisition: "その他相続人取得額",
+    spouseRelief: "配偶者の税額軽減",
+    payableTax: "分割案の一次相続税",
+    spouseTaxAfter: "配偶者の納付税額",
+    othersTax: "その他相続人の納付税額",
+    cashShortage: "分割案上の納税資金不足"
+  };
+  if (!labels[metric]) return null;
+  const assetLines = plan.rows.map((row) => `${row.label}：${yen(row.amount)} × 配偶者取得割合 ${pct(row.spousePct)} = ${yen(row.spouseAmount)}`);
+  const ratioLine = plan.visibleAssets > 0
+    ? `配偶者取得割合：${yen(plan.spouseVisibleAssets)} ÷ ${yen(plan.visibleAssets)} = ${pct(plan.spouseShare)}`
+    : "配偶者取得割合：資産別入力額が0円のため0%";
+  const commonLines = [
+    `資産別入力額の合計：${yen(plan.visibleAssets)}`,
+    ...assetLines,
+    `配偶者の資産別取得額合計：${yen(plan.spouseVisibleAssets)}`,
+    ratioLine,
+    `正味財産ベースの配偶者取得額：${yen(plan.estate.netEstate)} × ${pct(plan.spouseShare)} = ${yen(plan.spouseAcquisition)}`
+  ];
+  if (metric === "spouseAcquisition") {
+    return {
+      title: labels[metric],
+      note: "資産別取得割合から配偶者取得割合を求め、正味財産に乗じて概算しています。",
+      lines: commonLines
+    };
+  }
+  if (metric === "othersAcquisition") {
+    return {
+      title: labels[metric],
+      lines: [
+        ...commonLines,
+        `その他相続人取得額：正味財産 ${yen(plan.estate.netEstate)} - 配偶者取得額 ${yen(plan.spouseAcquisition)} = ${yen(plan.othersAcquisition)}`
+      ]
+    };
+  }
+  if (metric === "spouseRelief") {
+    return {
+      title: labels[metric],
+      note: "配偶者がいない場合、または配偶者取得額がない場合は税額軽減を0円として表示します。",
+      lines: [
+        ...commonLines,
+        `相続税総額概算：${yen(plan.taxBeforeCredit)}`,
+        `配偶者の税額軽減前税額：${yen(plan.taxBeforeCredit)} × ${pct(plan.spouseShare)} = ${yen(plan.spouseTaxBefore)}`,
+        `軽減上限：max(1億6,000万円, 正味財産 ${yen(plan.estate.netEstate)} × 法定相続分 ${pct(plan.spouseStatutoryShare)}) = ${yen(plan.spouseReliefLimit)}`,
+        `配偶者の税額軽減：${yen(plan.spouseRelief)}`
+      ]
+    };
+  }
+  if (metric === "spouseTaxAfter") {
+    return {
+      title: labels[metric],
+      lines: [
+        `配偶者の税額軽減前税額：${yen(plan.spouseTaxBefore)}`,
+        `配偶者の税額軽減：${yen(plan.spouseRelief)}`,
+        `配偶者の納付税額：${yen(plan.spouseTaxBefore)} - ${yen(plan.spouseRelief)} = ${yen(plan.spouseTaxAfter)}`
+      ]
+    };
+  }
+  if (metric === "othersTax") {
+    return {
+      title: labels[metric],
+      lines: [
+        `相続税総額概算：${yen(plan.taxBeforeCredit)}`,
+        `配偶者の税額軽減前税額：${yen(plan.spouseTaxBefore)}`,
+        `その他相続人の納付税額：${yen(plan.taxBeforeCredit)} - ${yen(plan.spouseTaxBefore)} = ${yen(plan.othersTax)}`
+      ]
+    };
+  }
+  if (metric === "payableTax") {
+    return {
+      title: labels[metric],
+      lines: [
+        `相続税総額概算：${yen(plan.taxBeforeCredit)}`,
+        `配偶者の税額軽減：${yen(plan.spouseRelief)}`,
+        `分割案の一次相続税：${yen(plan.taxBeforeCredit)} - ${yen(plan.spouseRelief)} = ${yen(plan.payableTax)}`
+      ]
+    };
+  }
+  return {
+    title: labels[metric],
+    note: "各グループに分けた現預金を納付税額に充てられる前提で、分割案上の不足額を確認します。",
+    lines: [
+      `配偶者側不足：配偶者納付税額 ${yen(plan.spouseTaxAfter)} - 配偶者取得現預金 ${yen(plan.spouseCash)} = ${yen(plan.spouseCashShortage)}`,
+      `その他相続人側不足：その他相続人納付税額 ${yen(plan.othersTax)} - その他相続人取得現預金 ${yen(plan.othersCash)} = ${yen(plan.othersCashShortage)}`,
+      `分割案上の納税資金不足：${yen(plan.spouseCashShortage)} + ${yen(plan.othersCashShortage)} = ${yen(plan.cashShortage)}`
     ]
   };
 }
@@ -1229,6 +1408,7 @@ function render() {
   renderRiskBand(risks);
   renderUnreflectedItems();
   renderSpouseScenarios();
+  renderDivisionPlan();
   renderActionComparison();
   renderActionRecommendations();
   if (!document.activeElement || !document.activeElement.closest("#actionList") || document.activeElement.type === "checkbox") renderActionCards();
@@ -1369,6 +1549,82 @@ function renderSpouseScenarios() {
       <td>${s.comment}</td>`;
     tbody.appendChild(tr);
   });
+}
+
+function renderDivisionPlan() {
+  const plan = calcDivisionPlan(state);
+  renderCards("divisionResults", [
+    ["配偶者取得額", yen(plan.spouseAcquisition), `取得割合 ${pct(plan.spouseShare)}`, "divisionPlan:spouseAcquisition"],
+    ["配偶者の税額軽減", yen(plan.spouseRelief), `軽減上限 ${yen(plan.spouseReliefLimit)}`, "divisionPlan:spouseRelief"],
+    ["分割案の一次相続税", yen(plan.payableTax), "配偶者税額軽減後", "divisionPlan:payableTax"],
+    ["分割案上の納税資金不足", yen(plan.cashShortage), "取得現預金で見た不足額", "divisionPlan:cashShortage"]
+  ]);
+
+  renderPieChart("divisionShareChart", "分割案の取得割合", state.divisionPlanName || "分割案", [
+    { label: "配偶者", value: plan.spouseAcquisition, breakdown: "divisionPlan:spouseAcquisition" },
+    { label: "その他相続人", value: plan.othersAcquisition, breakdown: "divisionPlan:othersAcquisition" }
+  ], { centerLabel: "正味財産" });
+
+  renderChart("divisionTaxChart", "分割案の税額", "相続税総額を実際の取得割合で按分し、配偶者税額軽減を控除します。", [
+    { label: "税額軽減前総額", value: plan.taxBeforeCredit, breakdown: "inheritanceTaxTotal" },
+    { label: "配偶者の税額軽減", value: plan.spouseRelief, breakdown: "divisionPlan:spouseRelief" },
+    { label: "納付税額合計", value: plan.payableTax, breakdown: "divisionPlan:payableTax" },
+    { label: "納税資金不足", value: plan.cashShortage, breakdown: "divisionPlan:cashShortage" }
+  ]);
+
+  const assetTbody = document.querySelector("#divisionAssetTable tbody");
+  if (assetTbody) {
+    assetTbody.innerHTML = plan.rows.map((row) => `
+      <tr>
+        <td>${esc(row.label)}</td>
+        <td>${yen(row.amount)}</td>
+        <td>${pct(row.spousePct)}</td>
+        <td>${yen(row.spouseAmount)}</td>
+        <td>${yen(row.othersAmount)}</td>
+      </tr>
+    `).join("") + `
+      <tr>
+        <td><strong>合計</strong></td>
+        <td><strong>${yen(plan.visibleAssets)}</strong></td>
+        <td>${pct(plan.spouseShare)}</td>
+        <td><strong>${yen(plan.spouseVisibleAssets)}</strong></td>
+        <td><strong>${yen(Math.max(0, plan.visibleAssets - plan.spouseVisibleAssets))}</strong></td>
+      </tr>
+    `;
+  }
+
+  const taxTbody = document.querySelector("#divisionTaxTable tbody");
+  if (taxTbody) {
+    taxTbody.innerHTML = `
+      <tr>
+        <td>配偶者</td>
+        <td>${calcValueHtml(yen(plan.spouseAcquisition), "divisionPlan:spouseAcquisition")}</td>
+        <td>${yen(plan.spouseTaxBefore)}</td>
+        <td>${calcValueHtml(yen(plan.spouseRelief), "divisionPlan:spouseRelief")}</td>
+        <td>${calcValueHtml(yen(plan.spouseTaxAfter), "divisionPlan:spouseTaxAfter")}</td>
+        <td>${yen(plan.spouseCash)}</td>
+        <td>${yen(plan.spouseCashShortage)}</td>
+      </tr>
+      <tr>
+        <td>その他相続人</td>
+        <td>${calcValueHtml(yen(plan.othersAcquisition), "divisionPlan:othersAcquisition")}</td>
+        <td>${calcValueHtml(yen(plan.othersTax), "divisionPlan:othersTax")}</td>
+        <td>--</td>
+        <td>${calcValueHtml(yen(plan.othersTax), "divisionPlan:othersTax")}</td>
+        <td>${yen(plan.othersCash)}</td>
+        <td>${yen(plan.othersCashShortage)}</td>
+      </tr>
+      <tr>
+        <td><strong>合計</strong></td>
+        <td><strong>${yen(plan.estate.netEstate)}</strong></td>
+        <td>${yen(plan.taxBeforeCredit)}</td>
+        <td>${yen(plan.spouseRelief)}</td>
+        <td><strong>${calcValueHtml(yen(plan.payableTax), "divisionPlan:payableTax")}</strong></td>
+        <td>${yen(num(state.cash))}</td>
+        <td><strong>${calcValueHtml(yen(plan.cashShortage), "divisionPlan:cashShortage")}</strong></td>
+      </tr>
+    `;
+  }
 }
 
 function diffText(diff) {
@@ -1611,6 +1867,7 @@ function renderReport() {
   const e = calcEstate(state);
   const r = diagnoseRisks(state);
   const effect = calcActionEffect();
+  const division = calcDivisionPlan(state);
   const tasks = getTaskSuggestions(state);
   const unreflected = getUnreflectedItems(state);
   const selectedActions = actionDefinitions().filter((def) => state[def.enabled]).map((def) => def.title);
@@ -1651,6 +1908,16 @@ function renderReport() {
       <p>生前贈与加算は ${yen(e.priorGiftAddBack)} を計算に反映しています。配偶者取得割合は一次相続だけでなく二次相続と生活資金を合わせて確認してください。</p>
     </section>
     <section class="report-block">
+      <h3>分割案・一次相続税</h3>
+      <p>${esc(state.divisionPlanName || "分割案")}：配偶者取得割合 ${pct(division.spouseShare)}、配偶者取得額 ${yen(division.spouseAcquisition)}、その他相続人取得額 ${yen(division.othersAcquisition)}。</p>
+      <div class="report-grid">
+        <div><span>税額軽減前</span><b>${yen(division.taxBeforeCredit)}</b></div>
+        <div><span>配偶者税額軽減</span><b>${yen(division.spouseRelief)}</b></div>
+        <div><span>一次相続税</span><b>${yen(division.payableTax)}</b></div>
+        <div><span>納税資金不足</span><b>${yen(division.cashShortage)}</b></div>
+      </div>
+    </section>
+    <section class="report-block">
       <h3>検討した打ち手</h3>
       ${selectedActions.length ? `<ul>${selectedActions.map((a) => `<li>${esc(a)}</li>`).join("")}</ul>` : "<p>打ち手候補は未選択です。</p>"}
     </section>
@@ -1682,6 +1949,7 @@ function getTpsMappingRows(input = state) {
   const e = calcEstate(input);
   const g = calcGift(input);
   const effect = calcActionEffect();
+  const division = calcDivisionPlan(input);
   const actionTitles = actionDefinitions().filter((def) => input[def.enabled]).map((def) => def.title);
   const spouseText = input.hasSpouse === "yes" ? "あり" : "なし";
   const familyCounts = [
@@ -1701,6 +1969,7 @@ function getTpsMappingRows(input = state) {
   const actionText = actionTitles.length
     ? `${actionTitles.join(" / ")}（相続税概算差額 ${yen(effect.taxReduction)}）`
     : "未選択";
+  const divisionText = `${input.divisionPlanName || "分割案"} / 配偶者取得 ${pct(division.spouseShare)} / 一次相続税 ${yen(division.payableTax)} / 納税資金不足 ${yen(division.cashShortage)}`;
 
   return [
     {
@@ -1734,6 +2003,14 @@ function getTpsMappingRows(input = state) {
       value: taxHeirText,
       status: "照合",
       note: "本ツールでは実子あり1人、実子なし2人までの養子算入制限を反映しています。TPS8200の自動判定結果と照合します。"
+    },
+    {
+      group: "2. 家族構成",
+      tps: "遺産分割案・配偶者税額軽減の確認",
+      source: "分割案タブ",
+      value: divisionText,
+      status: "要内訳",
+      note: "TPS8200側で相続人別の取得財産、配偶者税額軽減、納税額が本ツールの面談案と整合するか確認します。"
     },
     {
       group: "3. 所有財産",
@@ -2097,7 +2374,7 @@ function openSource(key) {
 }
 
 function openCalculationBreakdown(key) {
-  const item = actionEffectBreakdown(key) || actionDiffBreakdown(key) || spouseScenarioBreakdown(key) || getCalculationBreakdowns(state)[key];
+  const item = actionEffectBreakdown(key) || actionDiffBreakdown(key) || spouseScenarioBreakdown(key) || divisionPlanBreakdown(key) || getCalculationBreakdowns(state)[key];
   if (!item) return;
   document.getElementById("calcTitle").textContent = item.title;
   document.getElementById("calcBody").innerHTML = `

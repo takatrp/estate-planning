@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { defaults, normalizeState, getHeirInfo, calcEstate, calcGift } from "../app.js";
+import { defaults, normalizeState, getHeirInfo, calcEstate, calcGift, calcDivisionPlan } from "../app.js";
 
 function input(overrides = {}) {
   return normalizeState({ ...defaults, ...overrides });
@@ -110,4 +110,31 @@ test("settlement taxation applies only the remaining special deduction after the
   assert.equal(gift.remainingSpecial, 500_000);
   assert.equal(gift.settlementTaxable, 400_000);
   assert.equal(gift.settlementTax, 80_000);
+});
+
+test("division plan applies spouse relief based on actual spouse acquisition ratio", () => {
+  const plan = calcDivisionPlan(input({
+    cash: 30_000_000,
+    securities: 10_000_000,
+    homeProperty: 40_000_000,
+    rentalProperty: 0,
+    businessAssets: 0,
+    otherAssets: 0,
+    debts: 0,
+    funeralCosts: 2_000_000,
+    hasSpouse: "yes",
+    childrenCount: 2,
+    divisionCashSpousePct: 50,
+    divisionSecuritiesSpousePct: 50,
+    divisionHomePropertySpousePct: 100,
+    divisionRentalPropertySpousePct: 0,
+    divisionBusinessAssetsSpousePct: 0,
+    divisionOtherAssetsSpousePct: 50
+  }));
+
+  assert.equal(plan.estate.inheritanceTaxTotal, 3_250_000);
+  assert.equal(plan.spouseShare, 0.75);
+  assert.equal(plan.spouseAcquisition, 58_500_000);
+  assert.equal(plan.spouseRelief, 2_437_500);
+  assert.equal(plan.payableTax, 812_500);
 });
