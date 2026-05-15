@@ -396,10 +396,10 @@ function calcSpouseScenario(spouseShare) {
 
 function getDivisionRecipients(input = state, heirs = getHeirInfo(input)) {
   return [
-    { id: "spouse", label: String(input.divisionRecipientSpouseLabel || "配偶者").trim() || "配偶者", isSpouse: true },
-    { id: "heir1", label: String(input.divisionRecipientHeir1Label || "相続人A").trim() || "相続人A" },
-    { id: "heir2", label: String(input.divisionRecipientHeir2Label || "相続人B").trim() || "相続人B" },
-    { id: "heir3", label: String(input.divisionRecipientHeir3Label || "相続人C").trim() || "相続人C" }
+    { id: "spouse", field: "divisionRecipientSpouseLabel", label: String(input.divisionRecipientSpouseLabel || "配偶者").trim() || "配偶者", isSpouse: true },
+    { id: "heir1", field: "divisionRecipientHeir1Label", label: String(input.divisionRecipientHeir1Label || "相続人A").trim() || "相続人A" },
+    { id: "heir2", field: "divisionRecipientHeir2Label", label: String(input.divisionRecipientHeir2Label || "相続人B").trim() || "相続人B" },
+    { id: "heir3", field: "divisionRecipientHeir3Label", label: String(input.divisionRecipientHeir3Label || "相続人C").trim() || "相続人C" }
   ];
 }
 
@@ -1675,26 +1675,6 @@ function renderSpouseScenarios() {
 
 function renderDivisionPlan() {
   const plan = calcDivisionPlan(state);
-  renderCards("divisionResults", [
-    ["配偶者取得額", yen(plan.spouseAcquisition), `取得割合 ${pct(plan.spouseShare)}`, "divisionPlan:spouseAcquisition"],
-    ["配偶者の税額軽減", yen(plan.spouseRelief), `軽減上限 ${yen(plan.spouseReliefLimit)}`, "divisionPlan:spouseRelief"],
-    ["分割案の一次相続税", yen(plan.payableTax), "配偶者税額軽減後", "divisionPlan:payableTax"],
-    ["分割案上の納税資金不足", yen(plan.cashShortage), "取得現預金で見た不足額", "divisionPlan:cashShortage"]
-  ]);
-
-  renderPieChart("divisionShareChart", "分割案の取得割合", state.divisionPlanName || "分割案", plan.recipientTaxes.map((recipient) => ({
-    label: recipient.label,
-    value: recipient.acquisition,
-    breakdown: recipient.id === "spouse" ? "divisionPlan:spouseAcquisition" : "divisionPlan:othersAcquisition"
-  })), { centerLabel: "純取得額" });
-
-  renderChart("divisionTaxChart", "分割案の税額", "相続税総額を実際の取得割合で按分し、配偶者税額軽減を控除します。", [
-    { label: "税額軽減前総額", value: plan.taxBeforeCredit, breakdown: "inheritanceTaxTotal" },
-    { label: "配偶者の税額軽減", value: plan.spouseRelief, breakdown: "divisionPlan:spouseRelief" },
-    { label: "納付税額合計", value: plan.payableTax, breakdown: "divisionPlan:payableTax" },
-    { label: "納税資金不足", value: plan.cashShortage, breakdown: "divisionPlan:cashShortage" }
-  ]);
-
   const allocationWrap = document.getElementById("divisionAllocationTable");
   if (allocationWrap) {
     const taxSummaryRows = [
@@ -1737,7 +1717,11 @@ function renderDivisionPlan() {
               <th>種類</th>
               <th>細目</th>
               <th>財産・債務額</th>
-              ${plan.recipients.map((recipient) => `<th>${esc(recipient.label)}</th>`).join("")}
+              ${plan.recipients.map((recipient) => `
+                <th>
+                  <input class="division-recipient-input" data-division-recipient-label="${esc(recipient.field)}" value="${esc(recipient.label)}" aria-label="${esc(recipient.label)}の列名" />
+                </th>
+              `).join("")}
               <th>未配分</th>
             </tr>
           </thead>
@@ -2602,6 +2586,10 @@ if (typeof document !== "undefined") {
   syncFooterMeta();
 
   document.addEventListener("input", (e) => {
+    if (e.target.matches("[data-division-recipient-label]")) {
+      state[e.target.dataset.divisionRecipientLabel] = e.target.value;
+      return;
+    }
     if (e.target.matches("[data-division-row][data-division-recipient]")) {
       updateDivisionAllocationInput(e.target);
       return;
@@ -2614,6 +2602,12 @@ if (typeof document !== "undefined") {
   });
 
   document.addEventListener("change", (e) => {
+    if (e.target.matches("[data-division-recipient-label]")) {
+      state[e.target.dataset.divisionRecipientLabel] = e.target.value;
+      state = normalizeState(state);
+      render();
+      return;
+    }
     if (e.target.matches("[data-division-row][data-division-recipient]")) {
       updateDivisionAllocationInput(e.target);
       formatMoneyInput(e.target);
