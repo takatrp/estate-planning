@@ -159,7 +159,7 @@ test("division plan uses recipient allocation table for spouse and heirs", () =>
     }
   }));
 
-  assert.deepEqual(plan.recipients.map((recipient) => recipient.label), ["配偶者", "相続人A", "相続人B"]);
+  assert.deepEqual(plan.recipients.map((recipient) => recipient.label), ["配偶者", "相続人A", "相続人B", "相続人C"]);
   assert.equal(plan.recipientTotals.spouse, 48_000_000);
   assert.equal(plan.recipientTotals.heir1, 20_000_000);
   assert.equal(plan.recipientTotals.heir2, 10_000_000);

@@ -64,6 +64,10 @@ export const defaults = {
   actionCustomReductionEnabled: false,
   actionCustomReductionAmount: 0,
   divisionPlanName: "生活基盤・承継配慮案",
+  divisionRecipientSpouseLabel: "配偶者",
+  divisionRecipientHeir1Label: "相続人A",
+  divisionRecipientHeir2Label: "相続人B",
+  divisionRecipientHeir3Label: "相続人C",
   divisionAllocations: {},
   divisionCashSpousePct: 50,
   divisionSecuritiesSpousePct: 50,
@@ -391,14 +395,12 @@ function calcSpouseScenario(spouseShare) {
 }
 
 function getDivisionRecipients(input = state, heirs = getHeirInfo(input)) {
-  const recipients = [];
-  if (heirs.spouse) recipients.push({ id: "spouse", label: "配偶者" });
-  const otherCount = Math.max(heirs.childHeirsForTax, heirs.parents, heirs.siblings, recipients.length ? 0 : 1);
-  const names = ["A", "B", "C", "D", "E", "F", "G", "H"];
-  for (let i = 0; i < otherCount; i += 1) {
-    recipients.push({ id: `heir${i + 1}`, label: `相続人${names[i] || i + 1}` });
-  }
-  return recipients;
+  return [
+    { id: "spouse", label: String(input.divisionRecipientSpouseLabel || "配偶者").trim() || "配偶者", isSpouse: true },
+    { id: "heir1", label: String(input.divisionRecipientHeir1Label || "相続人A").trim() || "相続人A" },
+    { id: "heir2", label: String(input.divisionRecipientHeir2Label || "相続人B").trim() || "相続人B" },
+    { id: "heir3", label: String(input.divisionRecipientHeir3Label || "相続人C").trim() || "相続人C" }
+  ];
 }
 
 function getDivisionLineItems(input = state) {
@@ -449,7 +451,7 @@ export function calcDivisionPlan(input = state) {
   const recipients = getDivisionRecipients(normalized, e.heirs);
   const allocationRows = getDivisionLineItems(normalized).map((item) => {
     const stored = normalized.divisionAllocations[item.key] || {};
-    const hasStoredAllocation = Object.values(stored).some((value) => num(value) > 0);
+    const hasStoredAllocation = Object.prototype.hasOwnProperty.call(normalized.divisionAllocations, item.key);
     const defaultsForRow = hasStoredAllocation ? {} : defaultDivisionAllocation(item, recipients, normalized);
     const allocations = {};
     let allocated = 0;
@@ -480,11 +482,11 @@ export function calcDivisionPlan(input = state) {
   const othersAcquisition = Math.max(0, allocatedNetEstate - spouseAcquisition);
   const spouseShare = allocatedNetEstate > 0 ? spouseAcquisition / allocatedNetEstate : 0;
   const spouseStatutoryShare = e.heirs.shares.find((s) => s.label === "配偶者")?.share || 0;
-  const spouseReliefLimit = recipients.some((recipient) => recipient.id === "spouse") ? Math.max(160000000, e.netEstate * spouseStatutoryShare) : 0;
+  const hasLegalSpouse = e.heirs.spouse === 1;
+  const spouseReliefLimit = hasLegalSpouse ? Math.max(160000000, e.netEstate * spouseStatutoryShare) : 0;
   const taxBeforeCredit = e.inheritanceTaxTotal;
   const spouseTaxBefore = Math.floor(taxBeforeCredit * spouseShare);
-  const hasSpouse = recipients.some((recipient) => recipient.id === "spouse");
-  const spouseRelief = hasSpouse && spouseAcquisition > 0
+  const spouseRelief = hasLegalSpouse && spouseAcquisition > 0
     ? Math.floor(spouseTaxBefore * Math.min(1, spouseReliefLimit / spouseAcquisition))
     : 0;
   const spouseTaxAfter = Math.max(0, spouseTaxBefore - spouseRelief);
@@ -522,7 +524,7 @@ export function calcDivisionPlan(input = state) {
   const cashShortage = recipientTaxes.reduce((sum, recipient) => sum + recipient.cashShortage, 0);
   return {
     estate: e,
-    hasSpouse: recipients.some((recipient) => recipient.id === "spouse"),
+    hasSpouse: hasLegalSpouse,
     recipients,
     rows: allocationRows,
     grossListedAssets,
@@ -1695,6 +1697,37 @@ function renderDivisionPlan() {
 
   const allocationWrap = document.getElementById("divisionAllocationTable");
   if (allocationWrap) {
+    const taxSummaryRows = [
+      {
+        label: "税額軽減前税額",
+        total: plan.taxBeforeCredit,
+        totalBreakdown: "inheritanceTaxTotal",
+        values: plan.recipientTaxes.map((recipient) => yen(recipient.taxBeforeRelief))
+      },
+      {
+        label: "税額軽減",
+        total: plan.spouseRelief,
+        totalBreakdown: "divisionPlan:spouseRelief",
+        values: plan.recipientTaxes.map((recipient) => recipient.relief ? calcValueHtml(yen(recipient.relief), "divisionPlan:spouseRelief") : yen(0))
+      },
+      {
+        label: "納付税額",
+        total: plan.payableTax,
+        totalBreakdown: "divisionPlan:payableTax",
+        values: plan.recipientTaxes.map((recipient) => calcValueHtml(yen(recipient.taxAfterRelief), recipient.id === "spouse" ? "divisionPlan:spouseTaxAfter" : "divisionPlan:othersTax"))
+      },
+      {
+        label: "取得現預金",
+        total: plan.recipientTaxes.reduce((sum, recipient) => sum + recipient.cash, 0),
+        values: plan.recipientTaxes.map((recipient) => yen(recipient.cash))
+      },
+      {
+        label: "納税資金不足",
+        total: plan.cashShortage,
+        values: plan.recipientTaxes.map((recipient) => yen(recipient.cashShortage)),
+        highlight: true
+      }
+    ];
     allocationWrap.innerHTML = `
       <div class="table-wrap">
         <table id="divisionAssetTable" class="division-allocation-table">
@@ -1729,35 +1762,22 @@ function renderDivisionPlan() {
               ${plan.recipients.map((recipient) => `<td><strong>${yen(plan.recipientTotals[recipient.id] || 0)}</strong></td>`).join("")}
               <td>${yen(plan.estate.netEstate - plan.allocatedNetEstate)}</td>
             </tr>
+            <tr class="division-section-row">
+              <td colspan="${5 + plan.recipients.length}"><strong>分割案による税額・納税資金</strong></td>
+            </tr>
+            ${taxSummaryRows.map((row) => `
+              <tr class="${row.highlight ? "division-total-row" : "division-tax-row"}">
+                <td></td>
+                <td>税額・資金</td>
+                <td>${esc(row.label)}</td>
+                <td>${row.highlight ? `<strong>${calcValueHtml(yen(row.total), "divisionPlan:cashShortage")}</strong>` : (row.totalBreakdown ? calcValueHtml(yen(row.total), row.totalBreakdown) : yen(row.total))}</td>
+                ${row.values.map((value) => `<td>${value}</td>`).join("")}
+                <td></td>
+              </tr>
+            `).join("")}
           </tbody>
         </table>
       </div>
-    `;
-  }
-
-  const taxTbody = document.querySelector("#divisionTaxTable tbody");
-  if (taxTbody) {
-    taxTbody.innerHTML = `
-      ${plan.recipientTaxes.map((recipient) => `
-        <tr>
-          <td>${esc(recipient.label)}</td>
-          <td>${calcValueHtml(yen(recipient.acquisition), recipient.id === "spouse" ? "divisionPlan:spouseAcquisition" : "divisionPlan:othersAcquisition")}</td>
-          <td>${yen(recipient.taxBeforeRelief)}</td>
-          <td>${recipient.relief ? calcValueHtml(yen(recipient.relief), "divisionPlan:spouseRelief") : yen(0)}</td>
-          <td>${calcValueHtml(yen(recipient.taxAfterRelief), recipient.id === "spouse" ? "divisionPlan:spouseTaxAfter" : "divisionPlan:othersTax")}</td>
-          <td>${yen(recipient.cash)}</td>
-          <td>${yen(recipient.cashShortage)}</td>
-        </tr>
-      `).join("")}
-      <tr>
-        <td><strong>合計</strong></td>
-        <td><strong>${yen(plan.allocatedNetEstate)}</strong></td>
-        <td>${yen(plan.taxBeforeCredit)}</td>
-        <td>${yen(plan.spouseRelief)}</td>
-        <td><strong>${calcValueHtml(yen(plan.payableTax), "divisionPlan:payableTax")}</strong></td>
-        <td>${yen(num(state.cash))}</td>
-        <td><strong>${calcValueHtml(yen(plan.cashShortage), "divisionPlan:cashShortage")}</strong></td>
-      </tr>
     `;
   }
 }

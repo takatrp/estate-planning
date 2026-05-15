@@ -216,12 +216,14 @@ textarea{resize:vertical}
 .risk.low{background:var(--ok-bg);border-color:#badbcc;color:var(--ok)}
 .table-wrap{overflow:auto;border:1px solid var(--line);border-radius:18px}
 table{width:100%;border-collapse:collapse;background:#fff}
-#divisionAssetTable,#divisionTaxTable{min-width:900px}
+#divisionAssetTable{min-width:1080px}
 .division-allocation-table{font-size:.86rem}
 .division-allocation-table th,.division-allocation-table td{padding:5px 6px}
 .division-allocation-table input{min-width:8.5rem;padding:5px 7px;text-align:right}
 .division-allocation-table .debt-row{background:#fffaf0}
 .division-total-row{background:#eef7fb}
+.division-section-row{background:#f1f6f8}
+.division-tax-row{background:#fbfdfe}
 th,td{padding:8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
 th{background:#f1f6f8;color:#334155;white-space:nowrap}
 tr:last-child td{border-bottom:0}
@@ -350,8 +352,8 @@ footer.mk-mini a{color:inherit}
   .tps-workflow-list{grid-template-columns:repeat(2,1fr)}
   .tps-quick-table{font-size:8.5pt}
   .tps-map-table tr{break-inside:avoid}
-  #divisionAssetTable,#divisionTaxTable{font-size:8.5pt;min-width:0}
-  #divisionAssetTable th,#divisionAssetTable td,#divisionTaxTable th,#divisionTaxTable td{padding:4px 5px}
+  #divisionAssetTable{font-size:8.5pt;min-width:0}
+  #divisionAssetTable th,#divisionAssetTable td{padding:4px 5px}
   .tps-status{
     -webkit-print-color-adjust:exact;
     print-color-adjust:exact;
