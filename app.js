@@ -64,6 +64,7 @@ export const defaults = {
   actionCustomReductionEnabled: false,
   actionCustomReductionAmount: 0,
   divisionPlanName: "生活基盤・承継配慮案",
+  divisionAllocations: {},
   divisionCashSpousePct: 50,
   divisionSecuritiesSpousePct: 50,
   divisionHomePropertySpousePct: 100,
@@ -92,11 +93,25 @@ export function normalizeState(input) {
   const out = { ...defaults, ...input };
   for (const field of moneyFields) out[field] = toNumber(out[field]);
   for (const field of percentFields) out[field] = Math.min(100, Math.max(0, toNumber(out[field])));
+  out.divisionAllocations = normalizeDivisionAllocations(out.divisionAllocations);
   ["childrenCount", "adoptedCount", "parentsCount", "siblingsCount", "annualGiftRecipients", "annualGiftYears", "actionAnnualGiftRecipients", "actionAnnualGiftYears", "assumedInheritanceYear"].forEach((field) => {
     out[field] = Math.max(0, Math.floor(toNumber(out[field])));
   });
   ["actionAnnualGiftEnabled", "actionHousingGiftEnabled", "actionLifeInsuranceEnabled", "actionSpouseHomeGiftEnabled", "actionSettlementEnabled", "actionRentalPropertyEnabled", "actionStockReductionEnabled", "actionCustomReductionEnabled"].forEach((field) => {
     out[field] = Boolean(out[field]);
+  });
+  return out;
+}
+
+function normalizeDivisionAllocations(input = {}) {
+  const out = {};
+  if (!input || typeof input !== "object") return out;
+  Object.entries(input).forEach(([rowKey, recipients]) => {
+    if (!recipients || typeof recipients !== "object") return;
+    out[rowKey] = {};
+    Object.entries(recipients).forEach(([recipientId, value]) => {
+      out[rowKey][recipientId] = toNumber(value);
+    });
   });
   return out;
 }
@@ -122,12 +137,14 @@ const GIFT_TAX_URL = "https://takatrp.github.io/gift-tax/";
 const VERSION = "Rev.21";
 const CHART_COLORS = ["#578899", "#6b8f71", "#b7791f", "#7c6f99", "#9a6b5b", "#4f7c8c", "#8a7f5a"];
 const DIVISION_ASSETS = [
-  { key: "cash", pctField: "divisionCashSpousePct", label: "現預金" },
-  { key: "securities", pctField: "divisionSecuritiesSpousePct", label: "上場株式・投信等" },
-  { key: "homeProperty", pctField: "divisionHomePropertySpousePct", label: "自宅土地建物" },
-  { key: "rentalProperty", pctField: "divisionRentalPropertySpousePct", label: "賃貸不動産" },
-  { key: "businessAssets", pctField: "divisionBusinessAssetsSpousePct", label: "非上場株式・事業用資産" },
-  { key: "otherAssets", pctField: "divisionOtherAssetsSpousePct", label: "その他財産" }
+  { key: "cash", pctField: "divisionCashSpousePct", type: "現預金", detail: "預貯金・手許現金", label: "現預金", sign: 1 },
+  { key: "securities", pctField: "divisionSecuritiesSpousePct", type: "有価証券", detail: "上場株式・投信等", label: "上場株式・投信等", sign: 1 },
+  { key: "homeProperty", pctField: "divisionHomePropertySpousePct", type: "土地建物等", detail: "自宅土地建物", label: "自宅土地建物", sign: 1 },
+  { key: "rentalProperty", pctField: "divisionRentalPropertySpousePct", type: "土地建物等", detail: "賃貸不動産", label: "賃貸不動産", sign: 1 },
+  { key: "businessAssets", pctField: "divisionBusinessAssetsSpousePct", type: "事業用財産", detail: "非上場株式・事業用資産", label: "非上場株式・事業用資産", sign: 1 },
+  { key: "otherAssets", pctField: "divisionOtherAssetsSpousePct", type: "その他財産", detail: "その他財産", label: "その他財産", sign: 1 },
+  { key: "debts", type: "債務", detail: "借入金・未払金等", label: "債務", sign: -1 },
+  { key: "funeralCosts", type: "債務", detail: "葬式費用", label: "葬式費用", sign: -1 }
 ];
 const tabFlow = [
   ["summary", "概要"],
@@ -373,48 +390,148 @@ function calcSpouseScenario(spouseShare) {
   };
 }
 
+function getDivisionRecipients(input = state, heirs = getHeirInfo(input)) {
+  const recipients = [];
+  if (heirs.spouse) recipients.push({ id: "spouse", label: "配偶者" });
+  const otherCount = Math.max(heirs.childHeirsForTax, heirs.parents, heirs.siblings, recipients.length ? 0 : 1);
+  const names = ["A", "B", "C", "D", "E", "F", "G", "H"];
+  for (let i = 0; i < otherCount; i += 1) {
+    recipients.push({ id: `heir${i + 1}`, label: `相続人${names[i] || i + 1}` });
+  }
+  return recipients;
+}
+
+function getDivisionLineItems(input = state) {
+  return DIVISION_ASSETS.map((item, index) => ({
+    ...item,
+    no: index + 1,
+    amount: Math.max(0, num(input[item.key]))
+  }));
+}
+
+function legacyDivisionSpouseRatio(input = state) {
+  const positive = DIVISION_ASSETS.filter((item) => item.sign > 0);
+  const total = positive.reduce((sum, item) => sum + Math.max(0, num(input[item.key])), 0);
+  if (!total) return 0;
+  const spouseTotal = positive.reduce((sum, item) => {
+    const amount = Math.max(0, num(input[item.key]));
+    const pctField = item.pctField ? num(input[item.pctField]) / 100 : 0;
+    return sum + amount * Math.min(1, Math.max(0, pctField));
+  }, 0);
+  return spouseTotal / total;
+}
+
+function defaultDivisionAllocation(row, recipients, input = state) {
+  const allocations = {};
+  recipients.forEach((recipient) => { allocations[recipient.id] = 0; });
+  if (!recipients.length || row.amount <= 0) return allocations;
+  const spouse = recipients.find((recipient) => recipient.id === "spouse");
+  const firstOther = recipients.find((recipient) => recipient.id !== "spouse") || recipients[0];
+  if (row.sign > 0 && spouse && row.pctField) {
+    const spouseAmount = Math.floor(row.amount * Math.min(1, Math.max(0, num(input[row.pctField]) / 100)));
+    allocations.spouse = spouseAmount;
+    allocations[firstOther.id] = (allocations[firstOther.id] || 0) + Math.max(0, row.amount - spouseAmount);
+    return allocations;
+  }
+  if (row.sign < 0 && spouse) {
+    const spouseAmount = Math.floor(row.amount * legacyDivisionSpouseRatio(input));
+    allocations.spouse = spouseAmount;
+    allocations[firstOther.id] = (allocations[firstOther.id] || 0) + Math.max(0, row.amount - spouseAmount);
+    return allocations;
+  }
+  allocations[firstOther.id] = row.amount;
+  return allocations;
+}
+
 export function calcDivisionPlan(input = state) {
   const normalized = normalizeState(input);
   const e = calcEstate(normalized);
-  const hasSpouse = e.heirs.spouse === 1;
-  const rows = DIVISION_ASSETS.map((asset) => {
-    const amount = Math.max(0, num(normalized[asset.key]));
-    const spousePct = hasSpouse ? Math.min(100, Math.max(0, num(normalized[asset.pctField]))) / 100 : 0;
-    const spouseAmount = Math.floor(amount * spousePct);
-    return {
-      ...asset,
-      amount,
-      spousePct,
-      spouseAmount,
-      othersAmount: Math.max(0, amount - spouseAmount)
-    };
+  const recipients = getDivisionRecipients(normalized, e.heirs);
+  const allocationRows = getDivisionLineItems(normalized).map((item) => {
+    const stored = normalized.divisionAllocations[item.key] || {};
+    const hasStoredAllocation = Object.values(stored).some((value) => num(value) > 0);
+    const defaultsForRow = hasStoredAllocation ? {} : defaultDivisionAllocation(item, recipients, normalized);
+    const allocations = {};
+    let allocated = 0;
+    recipients.forEach((recipient) => {
+      const value = Math.max(0, num(hasStoredAllocation ? stored[recipient.id] : defaultsForRow[recipient.id]));
+      allocations[recipient.id] = value;
+      allocated += value;
+    });
+    const remainder = Math.max(0, item.amount - allocated);
+    return { ...item, allocations, allocated, remainder };
   });
-  const visibleAssets = rows.reduce((sum, row) => sum + row.amount, 0);
-  const spouseVisibleAssets = rows.reduce((sum, row) => sum + row.spouseAmount, 0);
-  const spouseShare = hasSpouse && visibleAssets > 0 ? spouseVisibleAssets / visibleAssets : 0;
-  const spouseAcquisition = Math.floor(e.netEstate * spouseShare);
-  const othersAcquisition = Math.max(0, e.netEstate - spouseAcquisition);
+  const positiveRows = allocationRows.filter((row) => row.sign > 0);
+  const negativeRows = allocationRows.filter((row) => row.sign < 0);
+  const grossListedAssets = positiveRows.reduce((sum, row) => sum + row.amount, 0);
+  const listedDeductions = negativeRows.reduce((sum, row) => sum + row.amount, 0);
+  const recipientTotals = {};
+  const recipientAssetTotals = {};
+  const recipientDebtTotals = {};
+  recipients.forEach((recipient) => {
+    const assetTotal = positiveRows.reduce((sum, row) => sum + (row.allocations[recipient.id] || 0), 0);
+    const debtTotal = negativeRows.reduce((sum, row) => sum + (row.allocations[recipient.id] || 0), 0);
+    recipientAssetTotals[recipient.id] = assetTotal;
+    recipientDebtTotals[recipient.id] = debtTotal;
+    recipientTotals[recipient.id] = Math.max(0, assetTotal - debtTotal);
+  });
+  const spouseAcquisition = recipientTotals.spouse || 0;
+  const allocatedNetEstate = recipients.reduce((sum, recipient) => sum + recipientTotals[recipient.id], 0);
+  const othersAcquisition = Math.max(0, allocatedNetEstate - spouseAcquisition);
+  const spouseShare = allocatedNetEstate > 0 ? spouseAcquisition / allocatedNetEstate : 0;
   const spouseStatutoryShare = e.heirs.shares.find((s) => s.label === "配偶者")?.share || 0;
-  const spouseReliefLimit = hasSpouse ? Math.max(160000000, e.netEstate * spouseStatutoryShare) : 0;
+  const spouseReliefLimit = recipients.some((recipient) => recipient.id === "spouse") ? Math.max(160000000, e.netEstate * spouseStatutoryShare) : 0;
   const taxBeforeCredit = e.inheritanceTaxTotal;
   const spouseTaxBefore = Math.floor(taxBeforeCredit * spouseShare);
+  const hasSpouse = recipients.some((recipient) => recipient.id === "spouse");
   const spouseRelief = hasSpouse && spouseAcquisition > 0
     ? Math.floor(spouseTaxBefore * Math.min(1, spouseReliefLimit / spouseAcquisition))
     : 0;
   const spouseTaxAfter = Math.max(0, spouseTaxBefore - spouseRelief);
   const othersTax = Math.max(0, taxBeforeCredit - spouseTaxBefore);
   const payableTax = spouseTaxAfter + othersTax;
-  const spouseCash = rows.find((row) => row.key === "cash")?.spouseAmount || 0;
-  const othersCash = Math.max(0, num(normalized.cash) - spouseCash);
-  const spouseCashShortage = Math.max(0, spouseTaxAfter - spouseCash);
-  const othersCashShortage = Math.max(0, othersTax - othersCash);
-  const cashShortage = spouseCashShortage + othersCashShortage;
+  const cashRow = allocationRows.find((row) => row.key === "cash");
+  const spouseCash = cashRow?.allocations.spouse || 0;
+  const othersCash = recipients
+    .filter((recipient) => recipient.id !== "spouse")
+    .reduce((sum, recipient) => sum + (cashRow?.allocations[recipient.id] || 0), 0);
+  const recipientTaxes = recipients.map((recipient) => {
+    const acquisition = recipientTotals[recipient.id] || 0;
+    const taxBeforeRelief = recipient.id === "spouse"
+      ? spouseTaxBefore
+      : Math.floor(othersTax * (othersAcquisition > 0 ? acquisition / othersAcquisition : 0));
+    const relief = recipient.id === "spouse" ? spouseRelief : 0;
+    const taxAfterRelief = Math.max(0, taxBeforeRelief - relief);
+    const cash = cashRow?.allocations[recipient.id] || 0;
+    return {
+      ...recipient,
+      acquisition,
+      assetTotal: recipientAssetTotals[recipient.id] || 0,
+      debtTotal: recipientDebtTotals[recipient.id] || 0,
+      taxBeforeRelief,
+      relief,
+      taxAfterRelief,
+      cash,
+      cashShortage: Math.max(0, taxAfterRelief - cash)
+    };
+  });
+  const spouseCashShortage = recipientTaxes.find((recipient) => recipient.id === "spouse")?.cashShortage || 0;
+  const othersCashShortage = recipientTaxes
+    .filter((recipient) => recipient.id !== "spouse")
+    .reduce((sum, recipient) => sum + recipient.cashShortage, 0);
+  const cashShortage = recipientTaxes.reduce((sum, recipient) => sum + recipient.cashShortage, 0);
   return {
     estate: e,
-    hasSpouse,
-    rows,
-    visibleAssets,
-    spouseVisibleAssets,
+    hasSpouse: recipients.some((recipient) => recipient.id === "spouse"),
+    recipients,
+    rows: allocationRows,
+    grossListedAssets,
+    listedDeductions,
+    allocatedNetEstate,
+    recipientTotals,
+    recipientAssetTotals,
+    recipientDebtTotals,
+    recipientTaxes,
     spouseShare,
     spouseAcquisition,
     othersAcquisition,
@@ -857,21 +974,24 @@ function divisionPlanBreakdown(key) {
     cashShortage: "分割案上の納税資金不足"
   };
   if (!labels[metric]) return null;
-  const assetLines = plan.rows.map((row) => `${row.label}：${yen(row.amount)} × 配偶者取得割合 ${pct(row.spousePct)} = ${yen(row.spouseAmount)}`);
-  const ratioLine = plan.visibleAssets > 0
-    ? `配偶者取得割合：${yen(plan.spouseVisibleAssets)} ÷ ${yen(plan.visibleAssets)} = ${pct(plan.spouseShare)}`
-    : "配偶者取得割合：資産別入力額が0円のため0%";
+  const spouseLines = plan.rows.map((row) => {
+    const allocation = row.allocations.spouse || 0;
+    return `${row.label}：${row.sign > 0 ? "取得" : "負担"} ${yen(allocation)}`;
+  });
+  const ratioLine = plan.allocatedNetEstate > 0
+    ? `配偶者取得割合：配偶者純取得額 ${yen(plan.spouseAcquisition)} ÷ 分割済み純財産 ${yen(plan.allocatedNetEstate)} = ${pct(plan.spouseShare)}`
+    : "配偶者取得割合：分割済み純財産が0円のため0%";
   const commonLines = [
-    `資産別入力額の合計：${yen(plan.visibleAssets)}`,
-    ...assetLines,
-    `配偶者の資産別取得額合計：${yen(plan.spouseVisibleAssets)}`,
-    ratioLine,
-    `正味財産ベースの配偶者取得額：${yen(plan.estate.netEstate)} × ${pct(plan.spouseShare)} = ${yen(plan.spouseAcquisition)}`
+    `分割表の財産合計：${yen(plan.grossListedAssets)}`,
+    `分割表の債務・葬式費用合計：${yen(plan.listedDeductions)}`,
+    ...spouseLines,
+    `配偶者の純取得額：財産 ${yen(plan.recipientAssetTotals.spouse || 0)} - 債務等 ${yen(plan.recipientDebtTotals.spouse || 0)} = ${yen(plan.spouseAcquisition)}`,
+    ratioLine
   ];
   if (metric === "spouseAcquisition") {
     return {
       title: labels[metric],
-      note: "資産別取得割合から配偶者取得割合を求め、正味財産に乗じて概算しています。",
+      note: "分割表で配偶者列に入力された財産から、配偶者が負担する債務等を控除して概算しています。",
       lines: commonLines
     };
   }
@@ -880,7 +1000,7 @@ function divisionPlanBreakdown(key) {
       title: labels[metric],
       lines: [
         ...commonLines,
-        `その他相続人取得額：正味財産 ${yen(plan.estate.netEstate)} - 配偶者取得額 ${yen(plan.spouseAcquisition)} = ${yen(plan.othersAcquisition)}`
+        `その他相続人取得額：分割済み純財産 ${yen(plan.allocatedNetEstate)} - 配偶者取得額 ${yen(plan.spouseAcquisition)} = ${yen(plan.othersAcquisition)}`
       ]
     };
   }
@@ -1560,10 +1680,11 @@ function renderDivisionPlan() {
     ["分割案上の納税資金不足", yen(plan.cashShortage), "取得現預金で見た不足額", "divisionPlan:cashShortage"]
   ]);
 
-  renderPieChart("divisionShareChart", "分割案の取得割合", state.divisionPlanName || "分割案", [
-    { label: "配偶者", value: plan.spouseAcquisition, breakdown: "divisionPlan:spouseAcquisition" },
-    { label: "その他相続人", value: plan.othersAcquisition, breakdown: "divisionPlan:othersAcquisition" }
-  ], { centerLabel: "正味財産" });
+  renderPieChart("divisionShareChart", "分割案の取得割合", state.divisionPlanName || "分割案", plan.recipientTaxes.map((recipient) => ({
+    label: recipient.label,
+    value: recipient.acquisition,
+    breakdown: recipient.id === "spouse" ? "divisionPlan:spouseAcquisition" : "divisionPlan:othersAcquisition"
+  })), { centerLabel: "純取得額" });
 
   renderChart("divisionTaxChart", "分割案の税額", "相続税総額を実際の取得割合で按分し、配偶者税額軽減を控除します。", [
     { label: "税額軽減前総額", value: plan.taxBeforeCredit, breakdown: "inheritanceTaxTotal" },
@@ -1572,51 +1693,65 @@ function renderDivisionPlan() {
     { label: "納税資金不足", value: plan.cashShortage, breakdown: "divisionPlan:cashShortage" }
   ]);
 
-  const assetTbody = document.querySelector("#divisionAssetTable tbody");
-  if (assetTbody) {
-    assetTbody.innerHTML = plan.rows.map((row) => `
-      <tr>
-        <td>${esc(row.label)}</td>
-        <td>${yen(row.amount)}</td>
-        <td>${pct(row.spousePct)}</td>
-        <td>${yen(row.spouseAmount)}</td>
-        <td>${yen(row.othersAmount)}</td>
-      </tr>
-    `).join("") + `
-      <tr>
-        <td><strong>合計</strong></td>
-        <td><strong>${yen(plan.visibleAssets)}</strong></td>
-        <td>${pct(plan.spouseShare)}</td>
-        <td><strong>${yen(plan.spouseVisibleAssets)}</strong></td>
-        <td><strong>${yen(Math.max(0, plan.visibleAssets - plan.spouseVisibleAssets))}</strong></td>
-      </tr>
+  const allocationWrap = document.getElementById("divisionAllocationTable");
+  if (allocationWrap) {
+    allocationWrap.innerHTML = `
+      <div class="table-wrap">
+        <table id="divisionAssetTable" class="division-allocation-table">
+          <thead>
+            <tr>
+              <th>行</th>
+              <th>種類</th>
+              <th>細目</th>
+              <th>財産・債務額</th>
+              ${plan.recipients.map((recipient) => `<th>${esc(recipient.label)}</th>`).join("")}
+              <th>未配分</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${plan.rows.map((row) => `
+              <tr class="${row.sign < 0 ? "debt-row" : ""}">
+                <td>${row.no}</td>
+                <td>${esc(row.type)}</td>
+                <td>${esc(row.detail)}</td>
+                <td>${yen(row.amount)}</td>
+                ${plan.recipients.map((recipient) => `
+                  <td>
+                    <input class="division-cell" data-division-row="${esc(row.key)}" data-division-recipient="${esc(recipient.id)}" inputmode="numeric" value="${comma(row.allocations[recipient.id] || 0)}" aria-label="${esc(row.label)} ${esc(recipient.label)}" />
+                  </td>
+                `).join("")}
+                <td class="${row.remainder > 0 ? "negative" : "positive"}">${yen(row.remainder)}</td>
+              </tr>
+            `).join("")}
+            <tr class="division-total-row">
+              <td colspan="3"><strong>純取得額合計</strong></td>
+              <td><strong>${yen(plan.allocatedNetEstate)}</strong></td>
+              ${plan.recipients.map((recipient) => `<td><strong>${yen(plan.recipientTotals[recipient.id] || 0)}</strong></td>`).join("")}
+              <td>${yen(plan.estate.netEstate - plan.allocatedNetEstate)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     `;
   }
 
   const taxTbody = document.querySelector("#divisionTaxTable tbody");
   if (taxTbody) {
     taxTbody.innerHTML = `
-      <tr>
-        <td>配偶者</td>
-        <td>${calcValueHtml(yen(plan.spouseAcquisition), "divisionPlan:spouseAcquisition")}</td>
-        <td>${yen(plan.spouseTaxBefore)}</td>
-        <td>${calcValueHtml(yen(plan.spouseRelief), "divisionPlan:spouseRelief")}</td>
-        <td>${calcValueHtml(yen(plan.spouseTaxAfter), "divisionPlan:spouseTaxAfter")}</td>
-        <td>${yen(plan.spouseCash)}</td>
-        <td>${yen(plan.spouseCashShortage)}</td>
-      </tr>
-      <tr>
-        <td>その他相続人</td>
-        <td>${calcValueHtml(yen(plan.othersAcquisition), "divisionPlan:othersAcquisition")}</td>
-        <td>${calcValueHtml(yen(plan.othersTax), "divisionPlan:othersTax")}</td>
-        <td>--</td>
-        <td>${calcValueHtml(yen(plan.othersTax), "divisionPlan:othersTax")}</td>
-        <td>${yen(plan.othersCash)}</td>
-        <td>${yen(plan.othersCashShortage)}</td>
-      </tr>
+      ${plan.recipientTaxes.map((recipient) => `
+        <tr>
+          <td>${esc(recipient.label)}</td>
+          <td>${calcValueHtml(yen(recipient.acquisition), recipient.id === "spouse" ? "divisionPlan:spouseAcquisition" : "divisionPlan:othersAcquisition")}</td>
+          <td>${yen(recipient.taxBeforeRelief)}</td>
+          <td>${recipient.relief ? calcValueHtml(yen(recipient.relief), "divisionPlan:spouseRelief") : yen(0)}</td>
+          <td>${calcValueHtml(yen(recipient.taxAfterRelief), recipient.id === "spouse" ? "divisionPlan:spouseTaxAfter" : "divisionPlan:othersTax")}</td>
+          <td>${yen(recipient.cash)}</td>
+          <td>${yen(recipient.cashShortage)}</td>
+        </tr>
+      `).join("")}
       <tr>
         <td><strong>合計</strong></td>
-        <td><strong>${yen(plan.estate.netEstate)}</strong></td>
+        <td><strong>${yen(plan.allocatedNetEstate)}</strong></td>
         <td>${yen(plan.taxBeforeCredit)}</td>
         <td>${yen(plan.spouseRelief)}</td>
         <td><strong>${calcValueHtml(yen(plan.payableTax), "divisionPlan:payableTax")}</strong></td>
@@ -2400,6 +2535,15 @@ function collectStateFromInputs() {
   state = normalizeState(state);
 }
 
+function updateDivisionAllocationInput(el) {
+  const rowKey = el.dataset.divisionRow;
+  const recipientId = el.dataset.divisionRecipient;
+  if (!rowKey || !recipientId) return;
+  if (!state.divisionAllocations || typeof state.divisionAllocations !== "object") state.divisionAllocations = {};
+  if (!state.divisionAllocations[rowKey]) state.divisionAllocations[rowKey] = {};
+  state.divisionAllocations[rowKey][recipientId] = toNumber(el.value);
+}
+
 function clearPrintScope() {
   document.body.classList.remove("print-scoped");
   document.querySelectorAll(".tab-panel.print-target").forEach((panel) => panel.classList.remove("print-target"));
@@ -2438,6 +2582,10 @@ if (typeof document !== "undefined") {
   syncFooterMeta();
 
   document.addEventListener("input", (e) => {
+    if (e.target.matches("[data-division-row][data-division-recipient]")) {
+      updateDivisionAllocationInput(e.target);
+      return;
+    }
     if (e.target.matches("[data-money]")) formatMoneyInput(e.target);
     if (e.target.matches("[data-field], [data-action-field]")) {
       collectStateFromInputs();
@@ -2446,6 +2594,13 @@ if (typeof document !== "undefined") {
   });
 
   document.addEventListener("change", (e) => {
+    if (e.target.matches("[data-division-row][data-division-recipient]")) {
+      updateDivisionAllocationInput(e.target);
+      formatMoneyInput(e.target);
+      state = normalizeState(state);
+      render();
+      return;
+    }
     if (e.target.matches("[data-field], [data-action-field]")) {
       collectStateFromInputs();
       render();

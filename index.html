@@ -432,29 +432,9 @@
           </div>
         </div>
 
-        <div class="input-group">
-          <h3>資産別の配偶者取得割合</h3>
-          <p class="group-note">配偶者がいない場合は0%として扱います。配偶者以外の取得分は、子・その他相続人グループとして集計します。</p>
-          <div class="grid three">
-            <label>現預金（%）
-              <input data-field="divisionCashSpousePct" type="number" min="0" max="100" step="1" />
-            </label>
-            <label>上場株式・投信等（%）
-              <input data-field="divisionSecuritiesSpousePct" type="number" min="0" max="100" step="1" />
-            </label>
-            <label>自宅土地建物（%）
-              <input data-field="divisionHomePropertySpousePct" type="number" min="0" max="100" step="1" />
-            </label>
-            <label>賃貸不動産（%）
-              <input data-field="divisionRentalPropertySpousePct" type="number" min="0" max="100" step="1" />
-            </label>
-            <label>非上場株式・事業用資産（%）
-              <input data-field="divisionBusinessAssetsSpousePct" type="number" min="0" max="100" step="1" />
-            </label>
-            <label>その他財産（%）
-              <input data-field="divisionOtherAssetsSpousePct" type="number" min="0" max="100" step="1" />
-            </label>
-          </div>
+        <div class="notice action-guidance">
+          <strong>操作方法</strong>
+          <p>資産・債務の行ごとに、配偶者・相続人A・相続人Bなどの列へ取得額または負担額を入力します。未配分が残る場合は表の右端で確認できます。</p>
         </div>
 
         <div class="result-cards" id="divisionResults"></div>
@@ -463,21 +443,8 @@
           <div class="chart-panel" id="divisionTaxChart"></div>
         </div>
 
-        <h3>資産別分割案</h3>
-        <div class="table-wrap">
-          <table id="divisionAssetTable">
-            <thead>
-              <tr>
-                <th>資産</th>
-                <th>評価額</th>
-                <th>配偶者取得割合</th>
-                <th>配偶者取得額</th>
-                <th>その他相続人取得額</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-        </div>
+        <h3>財産・債務の分割表</h3>
+        <div id="divisionAllocationTable"></div>
 
         <h3>分割案による税額・納税資金</h3>
         <div class="table-wrap">

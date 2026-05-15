@@ -138,3 +138,30 @@ test("division plan applies spouse relief based on actual spouse acquisition rat
   assert.equal(plan.spouseRelief, 2_437_500);
   assert.equal(plan.payableTax, 812_500);
 });
+
+test("division plan uses recipient allocation table for spouse and heirs", () => {
+  const plan = calcDivisionPlan(input({
+    cash: 30_000_000,
+    securities: 10_000_000,
+    homeProperty: 40_000_000,
+    rentalProperty: 0,
+    businessAssets: 0,
+    otherAssets: 0,
+    debts: 0,
+    funeralCosts: 2_000_000,
+    hasSpouse: "yes",
+    childrenCount: 2,
+    divisionAllocations: {
+      cash: { spouse: 10_000_000, heir1: 20_000_000, heir2: 0 },
+      securities: { spouse: 0, heir1: 0, heir2: 10_000_000 },
+      homeProperty: { spouse: 40_000_000, heir1: 0, heir2: 0 },
+      funeralCosts: { spouse: 2_000_000, heir1: 0, heir2: 0 }
+    }
+  }));
+
+  assert.deepEqual(plan.recipients.map((recipient) => recipient.label), ["配偶者", "相続人A", "相続人B"]);
+  assert.equal(plan.recipientTotals.spouse, 48_000_000);
+  assert.equal(plan.recipientTotals.heir1, 20_000_000);
+  assert.equal(plan.recipientTotals.heir2, 10_000_000);
+  assert.equal(plan.payableTax, 1_250_000);
+});

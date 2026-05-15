@@ -217,6 +217,11 @@ textarea{resize:vertical}
 .table-wrap{overflow:auto;border:1px solid var(--line);border-radius:18px}
 table{width:100%;border-collapse:collapse;background:#fff}
 #divisionAssetTable,#divisionTaxTable{min-width:900px}
+.division-allocation-table{font-size:.86rem}
+.division-allocation-table th,.division-allocation-table td{padding:5px 6px}
+.division-allocation-table input{min-width:8.5rem;padding:5px 7px;text-align:right}
+.division-allocation-table .debt-row{background:#fffaf0}
+.division-total-row{background:#eef7fb}
 th,td{padding:8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
 th{background:#f1f6f8;color:#334155;white-space:nowrap}
 tr:last-child td{border-bottom:0}
